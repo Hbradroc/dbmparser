@@ -302,6 +302,80 @@ function getJsPDFConstructor() {
   return null;
 }
 
+/** Report visual theme (aligned with app accent / slate neutrals). */
+const PDF_THEME = {
+  ink: [15, 23, 42],
+  muted: [100, 116, 139],
+  band: [30, 41, 59],
+  bandSub: [203, 213, 225],
+  accent: [56, 189, 248],
+  surface: [248, 250, 252],
+  border: [226, 232, 240],
+  tableHead: [30, 41, 59],
+  zebra: [248, 250, 252],
+  bodyText: [51, 65, 85],
+};
+
+function pdfPageGeom(doc) {
+  const pw = doc.internal.pageSize.getWidth();
+  const ph = doc.internal.pageSize.getHeight();
+  return { pw, ph, innerW: pw - 96 };
+}
+
+function drawPdfHeroHeader(doc, marg, ts) {
+  const { pw } = pdfPageGeom(doc);
+  doc.setFillColor(...PDF_THEME.band);
+  doc.rect(0, 0, pw, 78, "F");
+  doc.setFillColor(...PDF_THEME.accent);
+  doc.rect(0, 78, pw, 3.2, "F");
+  doc.setTextColor(255, 255, 255);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(20);
+  doc.text("DBM coil decode report", marg, 38);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10.5);
+  doc.setTextColor(...PDF_THEME.bandSub);
+  const sub = "Structured field breakdown · spreadsheet dimensions · primary drawing appendix";
+  doc.text(doc.splitTextToSize(sub, pw - marg * 2), marg, 54);
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "italic");
+  doc.text(ts, pw - marg, 38, { align: "right" });
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(...PDF_THEME.bodyText);
+  return 98;
+}
+
+function drawPdfSectionHeading(doc, marg, y, title) {
+  const { pw } = pdfPageGeom(doc);
+  doc.setTextColor(...PDF_THEME.ink);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(12);
+  doc.text(title, marg, y);
+  const tw = typeof doc.getTextWidth === "function" ? doc.getTextWidth(title) : title.length * 7;
+  const lineW = Math.min(tw + 8, pw - marg * 2);
+  doc.setDrawColor(...PDF_THEME.accent);
+  doc.setLineWidth(1);
+  doc.line(marg, y + 4, marg + lineW, y + 4);
+  return y + 28;
+}
+
+function stampSummaryPageFooters(doc, marg) {
+  const n =
+    typeof doc.getNumberOfPages === "function" ? doc.getNumberOfPages() : doc.internal.getNumberOfPages();
+  const { pw, ph } = pdfPageGeom(doc);
+  for (let i = 1; i <= n; i++) {
+    doc.setPage(i);
+    doc.setDrawColor(...PDF_THEME.border);
+    doc.setLineWidth(0.35);
+    doc.line(marg, ph - 40, pw - marg, ph - 40);
+    doc.setTextColor(...PDF_THEME.muted);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.text(`DBM coil decode · Summary ${i} / ${n}`, marg, ph - 24);
+  }
+}
+
 function screenshotFormatForPdf(dataUrl) {
   const u = String(dataUrl || "").toLowerCase();
   if (u.includes("image/jpeg") || u.includes("image/jpg")) return "JPEG";
@@ -314,21 +388,25 @@ function addScreenshotToPdf(doc, dataUrl, marginLeft, startY) {
       resolve(startY);
       return;
     }
+    const { pw, ph } = pdfPageGeom(doc);
     const im = new Image();
     im.onload = () => {
       try {
         const nw = im.naturalWidth || im.width || 1;
         const nh = im.naturalHeight || im.height || 1;
-        const maxW = 515;
+        const maxW = pw - marginLeft * 2 - 24;
         const ew = Math.min(maxW, (nw * 72) / 96);
         const eh = Math.max((nh * ew) / nw, 1);
         let y = startY;
-        if (y + eh > 780) {
+        if (y + eh + 50 > ph - 52) {
           doc.addPage();
-          y = 48;
+          y = 56;
         }
-        doc.addImage(dataUrl, screenshotFormatForPdf(dataUrl), marginLeft, y, ew, eh, undefined, "FAST");
-        resolve(y + eh + 16);
+        doc.setFillColor(...PDF_THEME.surface);
+        doc.setDrawColor(...PDF_THEME.border);
+        doc.roundedRect(marginLeft - 2, y - 6, ew + 8, eh + 8, 2, 2, "FD");
+        doc.addImage(dataUrl, screenshotFormatForPdf(dataUrl), marginLeft + 2, y, ew, eh, undefined, "FAST");
+        resolve(y + eh + 22);
       } catch (_) {
         resolve(startY);
       }
@@ -370,68 +448,97 @@ async function buildCoilReportPdfBytes() {
     return null;
   }
 
-  const marg = 40;
-  let y = 48;
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(14);
-  doc.text("DBM coil decode report", marg, y);
-  y += 24;
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(9);
-  doc.setTextColor(70);
+  const marg = 48;
+  const { pw, innerW } = pdfPageGeom(doc);
+
   const ts = reportSnapshot.decodedAt ? new Date(reportSnapshot.decodedAt).toLocaleString() : new Date().toLocaleString();
+  let y = drawPdfHeroHeader(doc, marg, ts);
+
+  doc.setTextColor(...PDF_THEME.muted);
+  doc.setFont("helvetica", "italic");
+  doc.setFontSize(9);
   const disclaimer = doc.splitTextToSize(
-    `Generated ${ts}. Coil decoding and spreadsheet mapping are indicative only — verify naming and dimensions with factory documentation. When a primary drawing PDF is matched, the full document is appended after this summary.`,
-    515,
+    `This summary is indicative only — confirm naming, materials, manifold sizes, and all dimensions against source XLS drawings and Calc98/factory releases. Pages after this summary may include the full primary coil drawing PDF.`,
+    innerW,
   );
   doc.text(disclaimer, marg, y);
-  y += disclaimer.length * 11 + 20;
-  doc.setTextColor(0);
-
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(11);
-  doc.text("Coil code", marg, y);
-  y += 16;
-  doc.setFont("courier", "normal");
-  doc.setFontSize(10);
-  const coilLines = doc.splitTextToSize(coil || "—", 515);
-  doc.text(coilLines, marg, y);
-  y += coilLines.length * 12 + 10;
+  y += disclaimer.length * 12 + 26;
   doc.setFont("helvetica", "normal");
+  doc.setTextColor(...PDF_THEME.bodyText);
+
+  y = drawPdfSectionHeading(doc, marg, y, "Coil identification");
+  const pad = 16;
+  const coilLines = doc.splitTextToSize(coil || "—", innerW - pad * 2);
+  const boxH = coilLines.length * 13 + pad * 2;
+  doc.setFillColor(...PDF_THEME.surface);
+  doc.setDrawColor(...PDF_THEME.border);
+  doc.setLineWidth(0.6);
+  if (typeof doc.roundedRect === "function") {
+    doc.roundedRect(marg, y, pw - marg * 2, boxH, 4, 4, "FD");
+  } else {
+    doc.rect(marg, y, pw - marg * 2, boxH, "FD");
+  }
+  doc.setFont("courier", "normal");
+  doc.setFontSize(10.5);
+  doc.setTextColor(...PDF_THEME.ink);
+  doc.text(coilLines, marg + pad, y + pad + 11);
+  doc.setFont("helvetica", "normal");
+  y += boxH + 22;
 
   if (reportSnapshot.ocrDataUrl) {
-    doc.setFontSize(8);
-    doc.setTextColor(90);
-    doc.text("Screenshot used for OCR (image below).", marg, y);
-    y += 14;
-    doc.setTextColor(0);
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(9);
+    doc.setTextColor(...PDF_THEME.muted);
+    doc.text("Source image (OCR) — cropped submittal or selection screen.", marg, y);
+    y += 16;
+    doc.setTextColor(...PDF_THEME.bodyText);
+    doc.setFont("helvetica", "normal");
     y = await addScreenshotToPdf(doc, reportSnapshot.ocrDataUrl, marg, y);
   }
 
-  y += 12;
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(11);
-  doc.text("Field breakdown", marg, y);
-  y += 14;
+  y += 8;
+  y = drawPdfSectionHeading(doc, marg, y, "Field breakdown");
   doc.autoTable({
     startY: y,
-    margin: { left: marg },
-    theme: "grid",
-    headStyles: { fillColor: [230, 235, 240], fontStyle: "bold", fontSize: 9 },
-    styles: { fontSize: 8, cellPadding: 4, overflow: "linebreak" },
-    columnStyles: { 3: { cellWidth: 230 } },
+    margin: { left: marg, right: marg },
+    tableWidth: innerW,
+    theme: "plain",
+    styles: {
+      font: "helvetica",
+      fontSize: 9,
+      cellPadding: { top: 7, bottom: 7, left: 8, right: 8 },
+      textColor: PDF_THEME.bodyText,
+      lineWidth: 0.2,
+      lineColor: PDF_THEME.border,
+      valign: "top",
+      overflow: "linebreak",
+    },
+    headStyles: {
+      fillColor: PDF_THEME.tableHead,
+      textColor: 255,
+      fontStyle: "bold",
+      fontSize: 9,
+      halign: "left",
+      cellPadding: 8,
+    },
+    alternateRowStyles: { fillColor: PDF_THEME.zebra },
+    columnStyles: {
+      0: { cellWidth: 34, halign: "center" },
+      1: { cellWidth: 94 },
+      2: { cellWidth: 76 },
+    },
     head: [["#", "Field", "Raw", "Meaning"]],
     body: res.rows.map((r) => [String(r.position), r.label, r.raw ? String(r.raw) : "—", String(r.meaning || "")]),
   });
-  y = doc.lastAutoTable.finalY + 22;
+  y = doc.lastAutoTable.finalY + 28;
 
   const dim = res.dimensionHits;
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(11);
-  doc.text("Spreadsheet dimensions", marg, y);
-  y += 16;
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(8);
+  const ph = pdfPageGeom(doc).ph;
+  if (y > ph - 130) {
+    doc.addPage();
+    y = 56;
+  }
+  y = drawPdfSectionHeading(doc, marg, y, "Spreadsheet dimensions");
 
   if (
     dim &&
@@ -440,48 +547,75 @@ async function buildCoilReportPdfBytes() {
     Array.isArray(dim.headers) &&
     dim.headers.length
   ) {
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(...PDF_THEME.muted);
     const dimLine = [
       dim.geniox != null ? `Geniox ${dim.geniox}` : null,
-      dim.geometry || null,
-      dim.application || null,
-      dim.sheetName ? `sheet: ${dim.sheetName}` : null,
+      dim.geometry ? `geometry ${dim.geometry}` : null,
+      dim.application ? `${dim.application}` : null,
+      dim.sheetName ? `sheet ${dim.sheetName}` : null,
       dim.layout || null,
       dim.sourceRelPath || null,
     ]
       .filter(Boolean)
       .join(" · ");
     if (dimLine) {
-      const metaChunks = doc.splitTextToSize(dimLine, 515);
+      const metaChunks = doc.splitTextToSize(dimLine, innerW);
       doc.text(metaChunks, marg, y);
-      y += metaChunks.length * 10 + 8;
+      y += metaChunks.length * 11 + 14;
     }
+    doc.setTextColor(...PDF_THEME.bodyText);
     const { headers: dh, rows: dr } = trimEmptyDimensionColumns(dim.headers, dim.matchedRows);
     doc.autoTable({
       startY: y,
-      margin: { left: marg },
-      theme: "grid",
-      styles: { fontSize: 7, cellPadding: 3 },
-      headStyles: { fillColor: [230, 235, 240], fontSize: 8 },
+      margin: { left: marg, right: marg },
+      tableWidth: innerW,
+      theme: "plain",
+      styles: {
+        font: "helvetica",
+        fontSize: 8,
+        cellPadding: { top: 6, bottom: 6, left: 6, right: 6 },
+        textColor: PDF_THEME.bodyText,
+        lineWidth: 0.2,
+        lineColor: PDF_THEME.border,
+        overflow: "linebreak",
+      },
+      headStyles: {
+        fillColor: PDF_THEME.tableHead,
+        textColor: 255,
+        fontStyle: "bold",
+        fontSize: 8,
+      },
+      alternateRowStyles: { fillColor: PDF_THEME.zebra },
       head: [dh.map((h) => (h != null && String(h).trim() !== "" ? String(h) : ""))],
       body: dr.map((row) => dh.map((_, jj) => (row[jj] != null && row[jj] !== "" ? String(row[jj]) : ""))),
     });
-    y = doc.lastAutoTable.finalY + 12;
+    y = doc.lastAutoTable.finalY + 14;
     if (dim.note) {
       doc.setFontSize(8);
-      const noteChunks = doc.splitTextToSize(String(dim.note), 515);
+      doc.setTextColor(...PDF_THEME.muted);
+      const noteChunks = doc.splitTextToSize(String(dim.note), innerW);
       doc.text(noteChunks, marg, y);
+      y += noteChunks.length * 11 + 6;
+      doc.setTextColor(...PDF_THEME.bodyText);
     }
   } else {
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(...PDF_THEME.muted);
     const msg =
       dim && dim.note
         ? dim.note
-        : "No spreadsheet row matched bundled dimension tables for this Geniox geometry / circuits / connection.";
-    const msgChunks = doc.splitTextToSize(msg, 515);
+        : "No spreadsheet row matched bundled dimension tables for this geometry / circuits / connection.";
+    const msgChunks = doc.splitTextToSize(msg, innerW);
     doc.text(msgChunks, marg, y);
   }
 
   const pack = res.drawingPack;
   const pdfAppendUrl = pack && pack.primaryPdfUrl ? String(pack.primaryPdfUrl) : "";
+
+  stampSummaryPageFooters(doc, marg);
 
   const buf = doc.output("arraybuffer");
   if (!window.PDFLib || !PDFLib.PDFDocument || !pdfAppendUrl) {
