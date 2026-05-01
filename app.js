@@ -70,15 +70,44 @@ function trimEmptyDimensionColumns(headers, rows) {
   };
 }
 
-/** Order matters: longer GX* codes first so the regex alternation matches GXHK before GXK. */
-const COIL_OCR_PREFIXES = ["GXHK", "GXK", "GXH", "COH", "COK"];
-const COIL_HEAD_RE = new RegExp(`\\b(?:${COIL_OCR_PREFIXES.join("|")})\\b`, "g");
+/** Longest first so GXHK beats GXK and GXK beats GX at the same slice offset. */
+const COIL_PREFIX_ORDER = ["GXHK", "GXK", "GXH", "COH", "COK"];
 
 /** Standard long form = coil prefix + (STANDARD_FIELDS.length − 1) hyphen segments — do not eat the next table row in OCR. */
 const OCR_MAX_SEGMENTS_AFTER_PREFIX =
   parser && Array.isArray(parser.STANDARD_FIELDS) && parser.STANDARD_FIELDS.length > 1
     ? parser.STANDARD_FIELDS.length - 1
     : 12;
+
+/** Accept partial OCR (missing a tail field); still prefer fuller strings via scoreOcrCandidate. */
+const OCR_MIN_SEGMENTS_AFTER_PREFIX = 8;
+
+/**
+ * Sliding-window prefix match works when Tesseract glues digits to GXH/GXK (GXH11-… drops the \b after H).
+ */
+function findCoilHeadMatches(lu) {
+  const s = String(lu || "");
+  const out = [];
+  for (let i = 0; i < s.length; i++) {
+    let best = "";
+    const slice = s.slice(i);
+    for (const name of COIL_PREFIX_ORDER) {
+      if (slice.startsWith(name) && name.length > best.length) best = name;
+    }
+    if (!best) continue;
+    const prev = i > 0 ? s[i - 1] : "";
+    if (/[A-Z0-9_]/.test(prev)) continue;
+    const after = s[i + best.length];
+    if (after !== undefined && /[A-Z]/.test(after)) continue;
+    out.push({ pfx: best, tail: i + best.length });
+  }
+  return out;
+}
+
+/** Only separators between cursor and next token — allows `/` gaps from fractional sizes. */
+function sliceIsGlueOnly(slice) {
+  return String(slice || "").replace(/[\s\-_:,·|\\/'"`]+/g, "").length === 0;
+}
 
 /** Labels from the row below / beside the coil line that OCR sometimes merges; never treat as coil tokens. */
 const OCR_COIL_SEGMENT_STOP = new Set([
@@ -134,7 +163,7 @@ function preprocessCoilOcr(raw) {
   s = s.replace(/\(\s*[^)]*\)/g, " ");
   s = s.replace(/coil\s*codes?:?\s*/gi, " ");
   s = s.replace(/hyphen(?:ated)?\s*code[:]?\s*/gi, " ");
-  s = s.replace(/\b(?:G\s*[6Gb]\s*X\s*H)\b|\b(?:G\s*X\s*H)\b|\bCXH\b/gi, "GXH");
+  s = s.replace(/\b(?:G\s*[I1il|]\s*[Xx]\s*[Hhs])\b|\bGYH\b|\b(?:G\s*[6Gb]\s*X\s*H)\b|\b(?:G\s*X\s*H)\b|\bCXH\b|\bQXH\b/gi, "GXH");
   s = s.replace(/\bG\s+X\s+[Kk]\b|\bG\s+X\s+X\s+H\s*K\b|\bQXK\b/gi, "GXK");
   s = s.replace(/\b(?:G\s*X\s*H\s*[Kk])\b/gi, "GXHK");
   s = s.replace(/\bC\s+[OØ0]\s+[Hhs]\b/gi, "COH");
@@ -215,8 +244,37 @@ function consumeFlexibleSegments(s, idx, maxTokens) {
   return { tokens, end: i };
 }
 
+/** Hyphen-delimited and/or glued runs (GXH11W55…); tries several skip offsets per token. */
+function consumeAdaptiveSegments(s, idx, maxTokens) {
+  const cap = typeof maxTokens === "number" && maxTokens > 0 ? maxTokens : OCR_MAX_SEGMENTS_AFTER_PREFIX;
+  const tokens = [];
+  let i = idx;
+  for (let guard = 0; guard < 32; guard++) {
+    if (tokens.length >= cap) break;
+    const starts = [...new Set([i, skipHyphenGlue(s, i), skipFlexibleTokenBoundary(s, i)])].sort((a, b) => a - b);
+    let chosen = null;
+    let at = -1;
+    for (const st of starts) {
+      if (st > i && !sliceIsGlueOnly(s.slice(i, st))) continue;
+      if (st >= s.length || !/[A-Z0-9.]/.test(s[st])) continue;
+      const m = matchLeadingCoilSegment(s.slice(st));
+      if (m) {
+        chosen = m;
+        at = st;
+        break;
+      }
+    }
+    if (!chosen || at < 0) break;
+    const compact = chosen[1].replace(/\s+/g, "").toUpperCase();
+    if (OCR_COIL_SEGMENT_STOP.has(compact)) break;
+    tokens.push(normalizeOcrToken(chosen[1]));
+    i = at + chosen[0].length;
+  }
+  return { tokens, end: i };
+}
+
 function scoreOcrCandidate(pfx, tokens) {
-  if (tokens.length < 10) return -1;
+  if (tokens.length < OCR_MIN_SEGMENTS_AFTER_PREFIX) return -1;
   const candidate = `${pfx}-${tokens.join("-")}`;
   let rank = tokens.length * 10 + (tokens.length >= OCR_MAX_SEGMENTS_AFTER_PREFIX ? 50 : 0);
   if (parseCoilCode) {
@@ -236,15 +294,12 @@ function extractCoilCodeFromOcrText(rawText) {
   let best = "";
   let bestRank = -1;
   for (const lu of variants) {
-    COIL_HEAD_RE.lastIndex = 0;
-    let m;
-    while ((m = COIL_HEAD_RE.exec(lu)) !== null) {
-      const pfx = m[0];
-      const start = m.index + m[0].length;
-      for (const consume of [consumeHyphenSegments, consumeFlexibleSegments]) {
-        const { tokens } = consume(lu, start, OCR_MAX_SEGMENTS_AFTER_PREFIX);
+    const heads = findCoilHeadMatches(lu);
+    for (const { pfx, tail } of heads) {
+      for (const consume of [consumeAdaptiveSegments, consumeHyphenSegments, consumeFlexibleSegments]) {
+        const { tokens } = consume(lu, tail, OCR_MAX_SEGMENTS_AFTER_PREFIX);
         const r = scoreOcrCandidate(pfx, tokens);
-        if (r > bestRank && tokens.length >= 10) {
+        if (r > bestRank && tokens.length >= OCR_MIN_SEGMENTS_AFTER_PREFIX) {
           bestRank = r;
           best = `${pfx}-${tokens.join("-")}`;
         }
@@ -266,7 +321,8 @@ function pickBestParsedCoilCodeFromTexts(textPieces) {
     if (!cand || seenCand.has(cand)) continue;
     seenCand.add(cand);
     const chunk = cand.split("-");
-    const rank = chunk.length >= 11 ? scoreOcrCandidate(chunk[0], chunk.slice(1)) : -1;
+    const rank =
+      chunk.length >= OCR_MIN_SEGMENTS_AFTER_PREFIX + 1 ? scoreOcrCandidate(chunk[0], chunk.slice(1)) : -1;
     if (rank > bestRank) {
       bestRank = rank;
       bestCode = cand;
@@ -335,11 +391,12 @@ async function upscaleBlobForOcr(blob) {
 
 async function recognizeOcrPasses(blob, onPassProgress) {
   const scaled = await upscaleBlobForOcr(blob);
-  const defs = [{ b: blob, opts: {}, key: "" }];
-  defs.push({ b: blob, opts: { tessedit_pageseg_mode: "11" }, key: "11" });
+  const baseOpts = { preserve_interword_spaces: "1" };
+  const defs = [{ b: blob, opts: { ...baseOpts }, key: "" }];
+  defs.push({ b: blob, opts: { ...baseOpts, tessedit_pageseg_mode: "11" }, key: "11" });
   if (scaled !== blob) {
-    defs.push({ b: scaled, opts: {}, key: "up" });
-    defs.push({ b: scaled, opts: { tessedit_pageseg_mode: "11" }, key: "up11" });
+    defs.push({ b: scaled, opts: { ...baseOpts }, key: "up" });
+    defs.push({ b: scaled, opts: { ...baseOpts, tessedit_pageseg_mode: "11" }, key: "up11" });
   }
   const texts = [];
   const seenFull = new Set();
@@ -405,7 +462,7 @@ async function runOcrOnBlob(blob) {
       return;
     }
     errEl.textContent =
-      "Could not find a long hyphenated coil pattern in the OCR text. Crop closer to the code row or paste the code manually.";
+      "Could not find a coil code pattern in the OCR text (often GXH-/GXK-… plus many segments). Crop tight around the Coil code row, or open “OCR raw text” below to see what was read.";
     if (ocrDebugEl && ocrDebugPreEl) {
       ocrDebugPreEl.textContent = debugBody ? debugBody.slice(0, 12000) : "(empty OCR result)";
       ocrDebugEl.hidden = false;
