@@ -327,7 +327,10 @@ function meaningForField(field, raw, standardTokens = []) {
         certain: true,
       };
     }
-    if (/^\d+(\s+\d+\/\d+)?(\s*")?$/i.test(raw.trim())) {
+    if (
+      /^\d+\s+\d+\/\d+(?:["'"′″]+)?$/i.test(raw.trim()) ||
+      /^\d+(\s+\d+\/\d+)?(\s*["'"′″])?$/i.test(raw.trim())
+    ) {
       return {
         text: `Connection / header nominal size ${raw}.`,
         certain: true,

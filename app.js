@@ -140,16 +140,25 @@ const OCR_COIL_SEGMENT_STOP = new Set([
   "TAP",
 ]);
 
-/** First token chunk in a hyphen or flexible-spaced coil run (supports "1 1/2", fin pitch decimals, AL11-style). */
+/** First token chunk in a hyphen or flexible-spaced coil run ("1 1/2", optional inch marks, fused 1"1/2, pitches, AJ1). */
 function matchLeadingCoilSegment(rest) {
-  return /^(\d+\s+\d+\s*\/\s*\d+["'"′″]*|\d+"?\s*\d+\s*\/\s*\d+|\d+\.\d+|[A-Z]{1,14}\d*|\d+)/i.exec(String(rest || ""));
+  const str = String(rest || "");
+  return (
+    /^(\d+\s+\d+\s*\/\s*\d+(?:\s*["'"′″]+)?|\d+"?\s*\d+\s*\/\s*\d+)/i.exec(str) ||
+    /^(\d+\.\d+|[A-Z]{1,14}\d*|\d+)/i.exec(str)
+  );
 }
 
 function normalizeOcrToken(t) {
-  return String(t || "")
-    .replace(/\s+/g, " ")
-    .replace(/^(\d+)\s+(\d+)\s*\/\s*(\d+)["'"′″]*$/i, "$1 $2/$3")
-    .trim();
+  let s = String(t || "").replace(/\s+/g, " ").trim();
+  let inch = "";
+  if (/["'"′″]+$/.test(s)) {
+    s = s.replace(/["'"′″]+$/g, "").trim();
+    inch = '"';
+  }
+  const fr = /^(\d+)\s+(\d+)\s*\/\s*(\d+)$/i.exec(s);
+  if (fr) return `${fr[1]} ${fr[2]}/${fr[3]}${inch}`;
+  return inch ? `${s}${inch}` : s;
 }
 
 /** Tesseract splits fin stock like AI11 into AI1 + 1; merge before joining. */
@@ -205,9 +214,9 @@ function appendTrailingConnectionFraction(code, lu) {
   }
   if (ix < 0) return code;
   const rest = pool.slice(ix + matchLen).trim();
-  const m = /^[\s,.|_-]*(?:[-–]\s*)?(\d+)\s+(\d+\/\d+)/.exec(rest);
+  const m = /^[\s,.|_-]*(?:[-–]\s*)?(\d+)\s+(\d+\/\d+)\s*(["'"′″]*)/.exec(rest);
   if (!m) return code;
-  const frac = normalizeOcrToken(`${m[1]} ${m[2]}`);
+  const frac = normalizeOcrToken(`${m[1]} ${m[2]}${m[3] || ""}`);
   return frac ? `${c}-${frac}` : code;
 }
 
