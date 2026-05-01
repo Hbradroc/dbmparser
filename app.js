@@ -19,6 +19,9 @@ const drawingPreviewMetaEl = $("#drawing-preview-meta");
 const drawingPreviewSlotEl = $("#drawing-preview-slot");
 const drawingPreviewNoneEl = $("#drawing-preview-none");
 const drawingPdfFrameEl = $("#drawing-pdf-frame");
+const dimExcelTitleEl = $("#dim-excel-title");
+const dimExcelMetaEl = $("#dim-excel-meta");
+const dimExcelWrapEl = $("#dim-excel-table-wrap");
 
 const LS_DRAWINGS_ROOT = "dbmCoilsDrawingsRoot";
 
@@ -82,6 +85,88 @@ function escapeHtml(s) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function renderDimensions(dimHits) {
+  if (!dimExcelTitleEl || !dimExcelMetaEl || !dimExcelWrapEl) return;
+  dimExcelWrapEl.innerHTML = "";
+  if (!dimHits) {
+    dimExcelTitleEl.hidden = true;
+    dimExcelMetaEl.hidden = true;
+    dimExcelWrapEl.hidden = true;
+    return;
+  }
+
+  dimExcelTitleEl.hidden = false;
+  dimExcelMetaEl.hidden = false;
+  dimExcelWrapEl.hidden = false;
+
+  const summaryBits = [
+    `Geniox ${dimHits.geniox} · ${dimHits.geometry}`,
+    dimHits.application ? dimHits.application : null,
+    dimHits.layout ? `layout: ${dimHits.layout}` : null,
+  ].filter(Boolean);
+  dimExcelMetaEl.replaceChildren();
+  dimExcelMetaEl.append(document.createTextNode(summaryBits.join(" · ")));
+  if (dimHits.sourceRelPath) {
+    dimExcelMetaEl.append(document.createTextNode(" · "));
+    dimExcelMetaEl.append(document.createTextNode(dimHits.sourceRelPath));
+  }
+  if (dimHits.sourceUrl) {
+    dimExcelMetaEl.append(document.createTextNode(" "));
+    const ax = document.createElement("a");
+    ax.href = dimHits.sourceUrl;
+    ax.target = "_blank";
+    ax.rel = "noopener noreferrer";
+    ax.className = "ref-link";
+    ax.textContent = "Open .xlsx";
+    dimExcelMetaEl.append(ax);
+  }
+
+  if (
+    !Array.isArray(dimHits.headers) ||
+    !dimHits.headers.length ||
+    !Array.isArray(dimHits.matchedRows) ||
+    !dimHits.matchedRows.length
+  ) {
+    const p = document.createElement("p");
+    p.className = "sub dim-empty-msg";
+    p.textContent =
+      dimHits.note || "No spreadsheet row matches this Geniox size (or circuit band) for the selected geometry / folder.";
+    dimExcelWrapEl.appendChild(p);
+    return;
+  }
+
+  const tbl = document.createElement("table");
+  tbl.className = "dim-grid";
+  const thead = document.createElement("thead");
+  const trh = document.createElement("tr");
+  for (const h of dimHits.headers) {
+    const th = document.createElement("th");
+    th.textContent = h != null && String(h).trim() !== "" ? String(h) : "\u00a0";
+    trh.appendChild(th);
+  }
+  thead.appendChild(trh);
+  tbl.appendChild(thead);
+  const tb = document.createElement("tbody");
+  for (const row of dimHits.matchedRows) {
+    const tr = document.createElement("tr");
+    for (let j = 0; j < dimHits.headers.length; j++) {
+      const td = document.createElement("td");
+      const v = row[j];
+      td.textContent = v == null || v === "" ? "" : String(v);
+      tr.appendChild(td);
+    }
+    tb.appendChild(tr);
+  }
+  tbl.appendChild(tb);
+  dimExcelWrapEl.appendChild(tbl);
+  if (dimHits.note) {
+    const pn = document.createElement("p");
+    pn.className = "sub dim-row-note";
+    pn.textContent = dimHits.note;
+    dimExcelWrapEl.appendChild(pn);
+  }
 }
 
 function renderPdfPreview(pack) {
@@ -188,12 +273,15 @@ function decode() {
     tableBody.innerHTML = "";
     summaryEl.value = "";
     renderDrawingRefs(null, drawingsRootEl.value);
+    renderPdfPreview(null);
+    renderDimensions(null);
     return;
   }
   renderSegments(result.tokens);
   renderTable(result.rows);
   summaryEl.value = result.supplierText;
   renderDrawingRefs(result.drawingPack, drawingsRootEl.value);
+  renderDimensions(result.dimensionHits);
 }
 
 btnDecode.addEventListener("click", decode);
@@ -219,6 +307,7 @@ btnClear.addEventListener("click", () => {
   summaryEl.value = "";
   renderDrawingRefs(null, drawingsRootEl.value);
   renderPdfPreview(null);
+  renderDimensions(null);
   inputEl.focus();
 });
 

@@ -31,6 +31,9 @@ const GEO_COIL_DOC_NOTE =
 /** Geniox field-2 size ≥ this uses Big Sizes (35–44) drawing packs alongside P25/P3012/P40. */
 const BIG_SIZES_GENIOX_MIN = 32;
 
+/** Largest Geniox size code present in bundled dimension spreadsheets (exclusive of 35+). */
+const DIMENSION_TABLE_GENIOX_MAX = 34;
+
 const LOOKUPS = {
   coilType: {
     COH: "Heating coil (COH)",
@@ -338,6 +341,135 @@ function inferGenioxSize(tokens) {
   return n;
 }
 
+function getCoilDimensionsCatalog() {
+  if (typeof window === "undefined" || !window.DBMM_COIL_DIM || typeof window.DBMM_COIL_DIM !== "object")
+    return null;
+  return window.DBMM_COIL_DIM;
+}
+
+/** GX10.05 → 10 ; plain number in col A → rounded int. */
+function gxLeadingGenioxFromCell(cell0) {
+  const s = String(cell0 ?? "").trim();
+  const m = s.match(/^GX\s*[,.]?\s*(\d+)/i);
+  if (m) return parseInt(m[1], 10);
+  const n = parseFloat(String(s).replace(",", "."));
+  if (Number.isFinite(n) && /^\s*\d+(\.\d+)?\s*$/.test(s)) return Math.round(n);
+  return null;
+}
+
+function circuitsColumnIndex(headers) {
+  if (!Array.isArray(headers)) return -1;
+  let i = headers.findIndex((h) => /CIRCUIT/i.test(String(h)));
+  if (i >= 0) return i;
+  i = headers.findIndex((h) => /NUMBER\s+OF\s+CIRCUITS/i.test(String(h)));
+  return i;
+}
+
+/** Band like "6 TO 10" vs coil circuits token numeric. */
+function circuitsBandAllowsCoil(bandCell, circuitsToken) {
+  const t = String(circuitsToken ?? "").trim();
+  if (!t || t === "*") return true;
+  const n = parseInt(t, 10);
+  if (!Number.isFinite(n)) return true;
+  const b = bandCell != null ? String(bandCell).trim() : "";
+  const rng = b.match(/(\d+)\s*(?:TO|-)\s*(\d+)/i);
+  if (rng) return n >= parseInt(rng[1], 10) && n <= parseInt(rng[2], 10);
+  const single = parseInt(b, 10);
+  if (Number.isFinite(single)) return n === single;
+  return true;
+}
+
+function rowMatchesGeniox(row0, geniox) {
+  const c0 = row0;
+  if (c0 == null || c0 === "") return false;
+  if (typeof c0 === "number" && Number.isFinite(c0) && Math.round(c0) === geniox) return true;
+  const gx = gxLeadingGenioxFromCell(c0);
+  if (gx !== null && gx === geniox) return true;
+  const pn = parseFloat(String(c0).replace(",", "."));
+  if (Number.isFinite(pn) && Math.round(pn) === geniox) return true;
+  return false;
+}
+
+/**
+ * Filter pre-extracted spreadsheet rows by Geniox / block size (col A / UNIT column) and circuits band when applicable.
+ */
+function matchDimensionRowsForGeniox(table, geniox, circuitsToken) {
+  const headers = table.headers || [];
+  const rows = table.rows || [];
+  const cIdx = circuitsColumnIndex(headers);
+  const out = [];
+  for (const row of rows) {
+    if (!Array.isArray(row) || row.length === 0) continue;
+    if (!rowMatchesGeniox(row[0], geniox)) continue;
+    if (cIdx >= 0 && cIdx < row.length && row[cIdx] != null && String(row[cIdx]).trim() !== "") {
+      if (!circuitsBandAllowsCoil(row[cIdx], circuitsToken)) continue;
+    }
+    out.push(row);
+  }
+  return out;
+}
+
+/**
+ * Dimension XLS excerpts (bundled JS) apply for Geniox codes < 35, i.e. through 34 — matches standard-line coil tables.
+ */
+function resolveCoilDimensions(tokens) {
+  const geniox = inferGenioxSize(tokens);
+  const geometryKey = inferDrawingGeometry(tokens);
+  const { apps } = inferDrawingApplications(tokens);
+  if (geniox == null || geniox > DIMENSION_TABLE_GENIOX_MAX || !geometryKey) return null;
+
+  const cat = getCoilDimensionsCatalog();
+  if (!cat || !cat[geometryKey]) return null;
+
+  const appsTry = apps.filter((a) => a !== "Changeover");
+  const circuitsToken = tokens[5];
+
+  const gatherHits = (withCircuitsFilter) => {
+    const out = [];
+    for (const app of appsTry) {
+      const table = cat[geometryKey][app];
+      if (!table || !table.rows || !table.headers) continue;
+      const tok = withCircuitsFilter ? circuitsToken : "*";
+      for (const row of matchDimensionRowsForGeniox(table, geniox, tok)) {
+        out.push({ app, row, table });
+      }
+    }
+    return out;
+  };
+
+  let hits = gatherHits(true);
+  if (!hits.length) hits = gatherHits(false);
+
+  if (!hits.length) {
+    const t0 = appsTry.map((app) => cat[geometryKey][app]).find(Boolean);
+    return {
+      geniox,
+      geometry: geometryKey,
+      application: appsTry.join(", ") || null,
+      headers: (t0 && t0.headers) || null,
+      matchedRows: [],
+      layout: (t0 && t0.layout) || null,
+      sourceRelPath: (t0 && t0.relPath) || null,
+      sourceUrl: t0 && t0.relPath ? bundledDrawingUrl(t0.relPath) : "",
+      note: `No row in bundled tables where block / UNIT matches Geniox ${geniox} for ${geometryKey} (${appsTry.join(", ")}) — table may list different numbering (DVH-Y / GX naming).`,
+    };
+  }
+
+  const first = hits[0];
+  const table = first.table;
+  return {
+    geniox,
+    geometry: geometryKey,
+    application: first.app,
+    headers: table.headers,
+    matchedRows: hits.map((h) => h.row),
+    layout: table.layout,
+    sourceRelPath: table.relPath,
+    sourceUrl: table.relPath ? bundledDrawingUrl(table.relPath) : "",
+    note: hits.length > 1 ? `${hits.length} matching rows (e.g. connection / circuit variants).` : null,
+  };
+}
+
 /**
  * Coils drawings folder: explicit P25/P3012/P40 prefix, else Geniox tube code digit in field 4.
  */
@@ -623,6 +755,7 @@ function parseCoilCode(input) {
       extra: [],
       supplierText: "",
       drawingPack: { files: [], note: null, geometry: null, applications: [] },
+      dimensionHits: null,
     };
   }
 
@@ -661,6 +794,7 @@ function parseCoilCode(input) {
 
   const allRows = rows.concat(extraRows);
   const drawingPack = selectDrawingReferences(tokens);
+  const dimensionHits = resolveCoilDimensions(tokens);
   const supplierText = buildSupplierSummary(input, allRows, drawingPack);
 
   return {
@@ -671,6 +805,7 @@ function parseCoilCode(input) {
     extra,
     supplierText,
     drawingPack,
+    dimensionHits,
   };
 }
 
@@ -707,12 +842,16 @@ window.DBM_PARSER = {
   GEO_COIL_DOC_NOTE,
   MANIFOLD_INPUT_TABLE13,
   DLL_COIL_TYPE_TABLE6,
+  BIG_SIZES_GENIOX_MIN,
+  DIMENSION_TABLE_GENIOX_MAX,
   normalizeInput,
   tokenize,
   parseCoilCode,
   selectDrawingReferences,
   inferDrawingGeometry,
   inferDrawingApplications,
+  inferGenioxSize,
+  resolveCoilDimensions,
   bundledDrawingsBaseUrl,
   bundledDrawingUrl,
   encodeDrawingPathSegments,
