@@ -1,5 +1,3 @@
-const { parseCoilCode } = window.DBM_PARSER;
-
 const $ = (sel) => document.querySelector(sel);
 
 const inputEl = $("#coil-input");
@@ -11,6 +9,9 @@ const tableBody = $("#decode-body");
 const segmentsEl = $("#segments");
 const summaryEl = $("#supplier-summary");
 const toastEl = $("#toast");
+
+const parser = window.DBM_PARSER;
+const parseCoilCode = parser && typeof parser.parseCoilCode === "function" ? parser.parseCoilCode : null;
 
 function showToast(msg) {
   toastEl.textContent = msg;
@@ -58,6 +59,11 @@ function escapeHtml(s) {
 
 function decode() {
   errEl.textContent = "";
+  if (!parseCoilCode) {
+    errEl.textContent =
+      "Parser failed to load. Confirm GitHub Pages is publishing the same folder as index.html and coilParser.js.";
+    return;
+  }
   const result = parseCoilCode(inputEl.value);
   if (!result.ok) {
     errEl.textContent = result.error;
@@ -91,7 +97,7 @@ btnCopy.addEventListener("click", async () => {
   try {
     await navigator.clipboard.writeText(summaryEl.value);
     showToast("Summary copied to clipboard");
-  } catch {
+  } catch (err) {
     summaryEl.select();
     document.execCommand("copy");
     showToast("Summary copied");
@@ -111,4 +117,4 @@ inputEl.value =
 
 decode();
 
-window.DBM_COIL = window.DBM_PARSER;
+window.DBM_COIL = window.DBM_PARSER || {};
