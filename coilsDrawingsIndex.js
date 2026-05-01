@@ -383,6 +383,13 @@
         "name":  "P40_SYSTEMAIR AHU HEATING COILS DIMENSIONS.XLSX",
         "relPath":  "P40/Heater/P40_SYSTEMAIR AHU HEATING COILS DIMENSIONS.XLSX",
         "ext":  ".xlsx"
+    },
+    {
+        "geometry":  "Reference",
+        "application":  "Reference",
+        "name":  "Tube Thickness.pdf",
+        "relPath":  "Reference/Tube Thickness.pdf",
+        "ext":  ".pdf"
     }
 ]
 ;

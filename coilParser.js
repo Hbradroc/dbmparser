@@ -82,12 +82,15 @@ const LOOKUPS = {
 };
 
 /**
- * ManualeDBM (Calc98 User Guide) geometry definitions:
- * - P3012: tube OD 12.45 mm (pitch 30 x 26 mm)
- * - P40: tube OD 16.45 mm (pitch 40 x 34.64 mm)
- * - P60: tube OD 16.45 mm (pitch 60 x 30 mm)
+ * ManualeDBM / DBM “Available materials” tube blocks + hosted Tube Thickness.pdf excerpt:
+ * - P25: tubes Cu / CuSn — thickness 0.30 / 0.50 mm
  */
 const MANUAL_GEOMETRY_SPECS = {
+  P25: {
+    tubeOdMm: "(see ManualeDBM geometry overview for P25 tube OD)",
+    pitchMm: "see ManualeDBM fin block for P25",
+    thicknessMm: "0.30 / 0.50 (Cu, CuSn — Tube Thickness.pdf / Manuale)",
+  },
   P3012: {
     tubeOdMm: "12.45",
     pitchMm: "30 x 26",
@@ -224,8 +227,12 @@ function meaningForField(field, raw, standardTokens = []) {
     const geom = String(standardTokens[0] || "").toUpperCase();
     const gspec = MANUAL_GEOMETRY_SPECS[geom] || null;
     if (gspec) {
+      const odLooksNumeric = /^[\d.]+$/.test(String(gspec.tubeOdMm).trim());
+      const odText = odLooksNumeric ? `${gspec.tubeOdMm} mm` : gspec.tubeOdMm;
+      const pitchLooksNumericPair = /\d/.test(String(gspec.pitchMm)) && /x/i.test(String(gspec.pitchMm));
+      const pitchText = pitchLooksNumericPair ? `${gspec.pitchMm} mm` : gspec.pitchMm;
       return {
-        text: `Geometry ${geom} (ManualeDBM): tube OD ${gspec.tubeOdMm} mm, tube pitch ${gspec.pitchMm} mm, allowed tube thickness (mm): ${gspec.thicknessMm}.`,
+        text: `Geometry ${geom} (ManualeDBM / tube tables): tube OD ${odText}, tube pitch ${pitchText}, allowed tube thickness (mm): ${gspec.thicknessMm}.`,
         certain: true,
       };
     }
@@ -370,7 +377,17 @@ function selectDrawingReferences(tokens) {
     files.push(p);
   }
 
+  const refDocs = catalog.filter((e) => e.geometry === "Reference");
+  for (const r of refDocs) {
+    if (seen.has(r.relPath)) continue;
+    seen.add(r.relPath);
+    files.push(r);
+  }
+
   files.sort((a, b) => {
+    const ra = a.geometry === "Reference" ? 1 : 0;
+    const rb = b.geometry === "Reference" ? 1 : 0;
+    if (ra !== rb) return ra - rb;
     const ga = String(a.geometry);
     const gb = String(b.geometry);
     if (ga !== gb) return ga.localeCompare(gb);
@@ -427,7 +444,9 @@ function appendDrawingRefsToSummary(lines, pack) {
     `Filtered geometry: ${pack.geometry || "P25 + P3012 + P40 (all)"} | Applications: ${pack.applications.join(", ")}`,
   );
   if (pack.note) lines.push(`Note: ${pack.note}`);
-  lines.push(`Files (${pack.files.length}) — URLs resolve from "./drawings/" next to index.html`);
+  lines.push(
+    `Files (${pack.files.length}) — URLs under "./drawings/" (includes Reference/* such as tube thickness tables).`,
+  );
   const wantUrls = typeof window !== "undefined" && window.location;
   for (const f of pack.files) {
     const tag = f.ext === ".xlsx" ? "XLSX" : "PDF";

@@ -25,6 +25,9 @@ $entries = foreach ($f in $files) {
   $application = $null
   if ($geometry -eq 'Big Sizes (35-44)') {
     $application = Infer-BigSizesApp $f.Name
+  } elseif ($geometry -eq 'Reference') {
+    # Shared PDFs (tube tables, etc.) — always listed with decode output
+    $application = 'Reference'
   } elseif ($parts.Length -ge 2) {
     $application = $parts[1]
   } else {
