@@ -96,33 +96,80 @@ const OCR_COIL_SEGMENT_STOP = new Set([
   "COPPER",
   "DIAMETER",
   "SERVICE",
+  "FROST",
+  "GUARD",
+  "RECOMMENDED",
 ]);
 
+/** First token chunk in a hyphen or flexible-spaced coil run (supports "1 1/2", fin pitch decimals, AL11-style). */
+function matchLeadingCoilSegment(rest) {
+  return /^(\d+\s+\d+\s*\/\s*\d+["'"′″]*|\d+"?\s*\d+\s*\/\s*\d+|\d+\.\d+|[A-Z]{1,14}\d*|\d+)/i.exec(String(rest || ""));
+}
+
+function normalizeOcrToken(t) {
+  return String(t || "")
+    .replace(/\s+/g, " ")
+    .replace(/^(\d+)\s+(\d+)\s*\/\s*(\d+)["'"′″]*$/i, "$1 $2/$3")
+    .trim();
+}
+
+/** Bridge line breaks OCR inserts inside coil strings (horizontal table lines). */
+function deepCleanCoilImageOcr(raw) {
+  let s = String(raw || "");
+  s = s.replace(/\r/g, "\n");
+  s = s.replace(/([A-Za-z0-9.])\s*\n\s*([A-Za-z0-9.])/g, "$1 $2");
+  s = s.replace(/([GXH gxh])(?:\s*\n\s*)+([XKHKxk])/gi, "$1$2");
+  return s.replace(/[ \t]+\n/g, "\n").replace(/\n+/g, " ");
+}
+
 function preprocessCoilOcr(raw) {
-  let s = String(raw || "")
+  let s = deepCleanCoilImageOcr(raw);
+  s = s
     .replace(/\r?\n|[\x0b\x0c\u0085\u2028\u2029]/g, " ")
-    .replace(/[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]/g, "-");
-  s = s.replace(/coil\s*code[:]?\s*/gi, " ");
-  s = s.replace(/\(\s*[^\)]*\)/g, " ");
+    .replace(/[`´]/g, "'")
+    .replace(/[·•|\uFF5C│┃]/g, " ")
+    .replace(/[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]/g, "-")
+    .replace(/\s*\/\s*/g, "/");
+  s = s.replace(/\(\s*\d+\s*%\s*\)/g, " ");
+  s = s.replace(/\(\s*[^)]*\)/g, " ");
+  s = s.replace(/coil\s*codes?:?\s*/gi, " ");
+  s = s.replace(/hyphen(?:ated)?\s*code[:]?\s*/gi, " ");
+  s = s.replace(/\b(?:G\s*[6Gb]\s*X\s*H)\b|\b(?:G\s*X\s*H)\b|\bCXH\b/gi, "GXH");
+  s = s.replace(/\bG\s+X\s+[Kk]\b|\bG\s+X\s+X\s+H\s*K\b|\bQXK\b/gi, "GXK");
+  s = s.replace(/\b(?:G\s*X\s*H\s*[Kk])\b/gi, "GXHK");
+  s = s.replace(/\bC\s+[OØ0]\s+[Hhs]\b/gi, "COH");
+  s = s.replace(/\bC\s+[OØ0]\s+[Kk]\b/gi, "COK");
+  s = s.replace(/\bGX\s*[.,]?\s*HK\b/gi, "GXHK");
+  s = s.replace(/\bGX\s*[.,]?\s*K\b/gi, "GXK");
+  s = s.replace(/\bGX\s*[.,]?\s*H\b/gi, "GXH");
   s = s.replace(/\bAI\s+11\b/gi, "AI11");
   s = s.replace(/\bAJ\s*1\b/gi, "AJ1");
+  s = s.replace(/\bA[Ll1Ii|]\s*11\b|\bALI\s*1\b/gi, "AL11");
+  s = s.replace(/\b(\d+)\s*["'′″]+\s*\s+(\d+)\s*\/\s*(\d+)/g, '$1 $2/$3');
   s = s.replace(/\b(\d+)\s*\.\s*(\d+)\b/g, "$1.$2");
-  s = s.replace(/\bGX\s*HK\b/gi, "GXHK");
-  s = s.replace(/\bGX\s*K\b/gi, "GXK");
-  s = s.replace(/\bGX\s*H\b/gi, "GXH");
-  s = s.replace(/\bC\s*O\s*H\b/gi, "COH");
-  s = s.replace(/\bC\s*O\s*K\b/gi, "COK");
   s = s.replace(/\s*-\s*/g, "-");
+  s = s.replace(/\s+:+\s*/g, " ");
+  s = s.replace(/-+/g, "-");
   s = s.replace(/\s+/g, " ");
   return s.trim().toUpperCase();
 }
 
-function skipWsHyphen(s, i) {
+function skipHyphenGlue(s, i) {
   let j = i;
   while (j < s.length && /\s/.test(s[j])) j++;
-  if (j < s.length && s[j] === "-") {
+  if (j < s.length && /[-—_:]/.test(s[j])) {
     j++;
     while (j < s.length && /\s/.test(s[j])) j++;
+  }
+  return j;
+}
+
+/** Between OCR tokens when hyphenators are weak (table gaps, slashes, commas). */
+function skipFlexibleTokenBoundary(s, i) {
+  let j = i;
+  for (let hop = 0; hop < 3; hop++) {
+    while (j < s.length && /[\s|,:;_·•]/.test(s[j])) j++;
+    while (j < s.length && /[-—]/.test(s[j])) j++;
   }
   return j;
 }
@@ -133,44 +180,192 @@ function consumeHyphenSegments(s, idx, maxTokens) {
   let i = idx;
   for (let guard = 0; guard < 28; guard++) {
     if (tokens.length >= cap) break;
-    const j = skipWsHyphen(s, i);
+    const j = skipHyphenGlue(s, i);
     i = j;
     if (i >= s.length || !/[A-Z0-9.]/.test(s[i])) break;
     const rest = s.slice(i);
-    const hm = /^(\d+\.\d+|[A-Z]{1,8}\d*|\d+)/.exec(rest);
+    const hm = matchLeadingCoilSegment(rest);
     if (!hm) break;
-    const piece = hm[1].toUpperCase();
+    const piece = hm[1].replace(/\s+/g, "").toUpperCase();
     if (OCR_COIL_SEGMENT_STOP.has(piece)) break;
-    tokens.push(hm[1]);
+    tokens.push(normalizeOcrToken(hm[1]));
     i += hm[0].length;
   }
   return { tokens, end: i };
 }
 
+function consumeFlexibleSegments(s, idx, maxTokens) {
+  const cap = typeof maxTokens === "number" && maxTokens > 0 ? maxTokens : OCR_MAX_SEGMENTS_AFTER_PREFIX;
+  const tokens = [];
+  let i = idx;
+  for (let guard = 0; guard < 28; guard++) {
+    if (tokens.length >= cap) break;
+    const jHyp = skipHyphenGlue(s, i);
+    const jFlex = skipFlexibleTokenBoundary(s, i);
+    i = Math.min(jHyp, jFlex);
+    if (i >= s.length || !/[A-Z0-9.]/.test(s[i])) break;
+    const rest = s.slice(i);
+    const hm = matchLeadingCoilSegment(rest);
+    if (!hm) break;
+    const compact = hm[1].replace(/\s+/g, "").toUpperCase();
+    if (OCR_COIL_SEGMENT_STOP.has(compact)) break;
+    tokens.push(normalizeOcrToken(hm[1]));
+    i += hm[0].length;
+  }
+  return { tokens, end: i };
+}
+
+function scoreOcrCandidate(pfx, tokens) {
+  if (tokens.length < 10) return -1;
+  const candidate = `${pfx}-${tokens.join("-")}`;
+  let rank = tokens.length * 10 + (tokens.length >= OCR_MAX_SEGMENTS_AFTER_PREFIX ? 50 : 0);
+  if (parseCoilCode) {
+    const r = parseCoilCode(candidate);
+    if (r.ok) rank += 800;
+  }
+  return rank;
+}
+
 function extractCoilCodeFromOcrText(rawText) {
-  const lu = preprocessCoilOcr(rawText);
-  if (!lu) return "";
+  const raw = String(rawText || "");
+  const variants = new Set([
+    preprocessCoilOcr(raw),
+    preprocessCoilOcr(raw.replace(/\//g, " / ")),
+    preprocessCoilOcr(deepCleanCoilImageOcr(raw)),
+  ].filter(Boolean));
   let best = "";
   let bestRank = -1;
-  COIL_HEAD_RE.lastIndex = 0;
-  let m;
-  while ((m = COIL_HEAD_RE.exec(lu)) !== null) {
-    const pfx = m[0];
-    const afterHead = m.index + m[0].length;
-    const { tokens } = consumeHyphenSegments(lu, afterHead, OCR_MAX_SEGMENTS_AFTER_PREFIX);
-    if (tokens.length < 10) continue;
-    const candidate = `${pfx}-${tokens.join("-")}`;
-    let rank = tokens.length * 10 + (tokens.length >= OCR_MAX_SEGMENTS_AFTER_PREFIX ? 50 : 0);
-    if (parseCoilCode) {
-      const r = parseCoilCode(candidate);
-      if (r.ok) rank += 800;
-    }
-    if (rank > bestRank) {
-      bestRank = rank;
-      best = candidate;
+  for (const lu of variants) {
+    COIL_HEAD_RE.lastIndex = 0;
+    let m;
+    while ((m = COIL_HEAD_RE.exec(lu)) !== null) {
+      const pfx = m[0];
+      const start = m.index + m[0].length;
+      for (const consume of [consumeHyphenSegments, consumeFlexibleSegments]) {
+        const { tokens } = consume(lu, start, OCR_MAX_SEGMENTS_AFTER_PREFIX);
+        const r = scoreOcrCandidate(pfx, tokens);
+        if (r > bestRank && tokens.length >= 10) {
+          bestRank = r;
+          best = `${pfx}-${tokens.join("-")}`;
+        }
+      }
     }
   }
   return best;
+}
+
+function pickBestParsedCoilCodeFromTexts(textPieces) {
+  const parts = [...new Set(textPieces.map((t) => String(t || "").trim()).filter(Boolean))];
+  const tryFirst = [...parts];
+  tryFirst.unshift(parts.join("\n\n"));
+  let bestCode = "";
+  let bestRank = -1;
+  const seenCand = new Set();
+  for (const piece of tryFirst) {
+    const cand = extractCoilCodeFromOcrText(piece);
+    if (!cand || seenCand.has(cand)) continue;
+    seenCand.add(cand);
+    const chunk = cand.split("-");
+    const rank = chunk.length >= 11 ? scoreOcrCandidate(chunk[0], chunk.slice(1)) : -1;
+    if (rank > bestRank) {
+      bestRank = rank;
+      bestCode = cand;
+    }
+  }
+  return bestCode;
+}
+
+async function upscaleBlobForOcr(blob) {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const w = img.naturalWidth;
+        const h = img.naturalHeight;
+        if (!w || !h) {
+          URL.revokeObjectURL(url);
+          resolve(blob);
+          return;
+        }
+        const longEdge = Math.max(w, h);
+        const targetMax = 2200;
+        const boostIfBelow = 1200;
+        let scale = 1;
+        if (longEdge < boostIfBelow) scale = Math.min(2.5, boostIfBelow / longEdge);
+        if (longEdge * scale > targetMax) scale = targetMax / longEdge;
+        if (scale < 1.06) {
+          URL.revokeObjectURL(url);
+          resolve(blob);
+          return;
+        }
+        const nw = Math.round(w * scale);
+        const nh = Math.round(h * scale);
+        const c = document.createElement("canvas");
+        c.width = nw;
+        c.height = nh;
+        const ctx = c.getContext("2d");
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, nw, nh);
+        ctx.filter = "contrast(1.07)";
+        ctx.drawImage(img, 0, 0, nw, nh);
+        ctx.filter = "none";
+        c.toBlob(
+          (b) => {
+            URL.revokeObjectURL(url);
+            resolve(b && b.size ? b : blob);
+          },
+          "image/png",
+          0.92
+        );
+      } catch (_) {
+        URL.revokeObjectURL(url);
+        resolve(blob);
+      }
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(blob);
+    };
+    img.src = url;
+  });
+}
+
+async function recognizeOcrPasses(blob, onPassProgress) {
+  const scaled = await upscaleBlobForOcr(blob);
+  const defs = [{ b: blob, opts: {}, key: "" }];
+  defs.push({ b: blob, opts: { tessedit_pageseg_mode: "11" }, key: "11" });
+  if (scaled !== blob) {
+    defs.push({ b: scaled, opts: {}, key: "up" });
+    defs.push({ b: scaled, opts: { tessedit_pageseg_mode: "11" }, key: "up11" });
+  }
+  const texts = [];
+  const seenFull = new Set();
+  let pass = 0;
+  const total = defs.length;
+  for (const def of defs) {
+    pass += 1;
+    const logger = {
+      logger(m) {
+        if (!onPassProgress || m.status !== "recognizing text") return;
+        const p = Math.min(1, (pass - 1 + (m.progress || 0)) / total);
+        onPassProgress(pass, total, Math.round(p * 100));
+      },
+    };
+    try {
+      const ret = await Tesseract.recognize(def.b, "eng", { ...def.opts, ...logger });
+      const t = (ret?.data?.text || "").trim();
+      if (t && !seenFull.has(t)) {
+        seenFull.add(t);
+        texts.push(t);
+      }
+    } catch (_) {
+      /* next pass */
+    }
+  }
+  return texts;
 }
 
 async function runOcrOnBlob(blob) {
@@ -195,17 +390,14 @@ async function runOcrOnBlob(blob) {
     ocrStatusEl.textContent = "Reading image… (first run may download OCR data)";
   }
   try {
-    const ret = await Tesseract.recognize(blob, "eng", {
-      logger(m) {
-        if (!ocrStatusEl) return;
-        if (m.status === "recognizing text") {
-          ocrStatusEl.textContent = `OCR… ${Math.round((m.progress || 0) * 100)}%`;
-        }
-      },
+    const texts = await recognizeOcrPasses(blob, (_pass, total, pct) => {
+      if (!ocrStatusEl) return;
+      ocrStatusEl.style.color = "var(--accent)";
+      ocrStatusEl.textContent = `Reading image (${total} passes max)… ${pct}%`;
     });
-    const text = ret?.data?.text || "";
+    const debugBody = texts.length ? texts.join("\n---\n") : "";
     if (ocrStatusEl) ocrStatusEl.textContent = "";
-    const code = extractCoilCodeFromOcrText(text);
+    const code = pickBestParsedCoilCodeFromTexts(texts);
     if (code) {
       inputEl.value = code;
       showToast("Coil code extracted from image");
@@ -215,7 +407,7 @@ async function runOcrOnBlob(blob) {
     errEl.textContent =
       "Could not find a long hyphenated coil pattern in the OCR text. Crop closer to the code row or paste the code manually.";
     if (ocrDebugEl && ocrDebugPreEl) {
-      ocrDebugPreEl.textContent = text.trim() ? text.trim().slice(0, 6000) : "(empty OCR result)";
+      ocrDebugPreEl.textContent = debugBody ? debugBody.slice(0, 12000) : "(empty OCR result)";
       ocrDebugEl.hidden = false;
     }
   } catch (err) {
