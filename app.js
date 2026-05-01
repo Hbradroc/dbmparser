@@ -7,8 +7,7 @@ const inputEl = $("#coil-input");
 const btnDecode = $("#btn-decode");
 const btnClear = $("#btn-clear");
 const btnCopy = $("#btn-copy-summary");
-const btnReportDownload = $("#btn-report-download");
-const btnReportPrint = $("#btn-report-print");
+const btnReportPdf = $("#btn-report-pdf");
 const errEl = $("#error-msg");
 const tableBody = $("#decode-body");
 const segmentsEl = $("#segments");
@@ -286,98 +285,6 @@ function escapeHtml(s) {
     .replace(/"/g, "&quot;");
 }
 
-function escapeHtmlAttrDouble(s) {
-  return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;");
-}
-
-const REPORT_DOC_STYLES = `
-:root { --r-border:#c8ced4; --r-muted:#5a6570; --r-head:#0f172a; }
-body { margin:0; font:12px/1.45 Segoe UI,system-ui,sans-serif; color:#222; background:#fff; }
-.wrap { max-width:900px; margin:0 auto; padding:24px 28px 40px; }
-h1 { font-size:1.15rem; font-weight:600; letter-spacing:.04em; color:var(--r-head); margin:0 0 4px; text-transform:uppercase; }
-.doc-sub { color:var(--r-muted); font-size:.88rem; margin:0 0 18px; }
-section { margin-bottom:22px; }
-h2 { font-size:.72rem; text-transform:uppercase; letter-spacing:.1em; color:var(--r-muted); border-bottom:1px solid var(--r-border); padding-bottom:5px; margin:0 0 10px; }
-.coil-line { font:14px/1.4 ui-monospace,Consolas,monospace; background:#f4f6f8; padding:10px 12px; border:1px solid var(--r-border); border-radius:6px; word-break:break-all; }
-.source-tag { font-size:.8rem; color:var(--r-muted); margin:8px 0 0; }
-.thumb-wrap { margin:12px 0 0; max-width:440px; border:1px solid var(--r-border); border-radius:6px; overflow:hidden; background:#fafbfc; }
-.thumb-wrap img { display:block; width:100%; height:auto; max-height:280px; object-fit:contain; }
-table.rpt { width:100%; border-collapse:collapse; font-size:11.5px; }
-table.rpt th, table.rpt td { border:1px solid var(--r-border); padding:7px 9px; vertical-align:top; text-align:left; }
-table.rpt th { background:#f0f3f6; font-weight:600; color:#1e293b; }
-table.rpt tbody tr:nth-child(even) td { background:#fafbfc; }
-pre.rfq { font:11px/1.45 ui-monospace,Consolas,monospace; background:#f8fafc; padding:10px 12px; border:1px solid var(--r-border); border-radius:6px; white-space:pre-wrap; word-break:break-word; margin:0; }
-ul.draw { margin:0; padding-left:1.15rem; font-size:11.5px; }
-ul.draw li { margin-bottom:6px; }
-.ft { color:var(--r-muted); font-size:10px; margin-top:24px; padding-top:12px; border-top:1px solid var(--r-border); }
-`;
-
-function decodeFieldTableHtml(rows) {
-  if (!Array.isArray(rows) || !rows.length) {
-    return "<p class=\"doc-sub\">No field rows.</p>";
-  }
-  let h =
-    '<table class="rpt"><thead><tr><th>#</th><th>Field</th><th>Raw</th><th>Meaning</th></tr></thead><tbody>';
-  for (const r of rows) {
-    h += `<tr><td>${escapeHtml(String(r.position))}</td><td>${escapeHtml(r.label)}</td><td>${escapeHtml(r.raw ? r.raw : "—")}</td><td>${escapeHtml(String(r.meaning || ""))}</td></tr>`;
-  }
-  h += "</tbody></table>";
-  return h;
-}
-
-function decodeDimTableHtml(dimHits) {
-  if (!dimHits || !Array.isArray(dimHits.matchedRows) || !dimHits.matchedRows.length) {
-    const msg =
-      dimHits && dimHits.note
-        ? dimHits.note
-        : "No spreadsheet row matched Geniox / circuits / connection filters for bundled tables.";
-    return `<p class="doc-sub">${escapeHtml(msg)}</p>`;
-  }
-  const { headers: th, rows: trs } = trimEmptyDimensionColumns(dimHits.headers || [], dimHits.matchedRows);
-  let html = '<table class="rpt"><thead><tr>';
-  for (const col of th) {
-    html += `<th>${escapeHtml(col != null && String(col).trim() !== "" ? String(col) : "\u00a0")}</th>`;
-  }
-  html += "</tr></thead><tbody>";
-  for (const row of trs) {
-    html += "<tr>";
-    for (let j = 0; j < th.length; j++) {
-      const v = row[j];
-      html += `<td>${escapeHtml(v != null && v !== "" ? String(v) : "")}</td>`;
-    }
-    html += "</tr>";
-  }
-  html += "</tbody></table>";
-  return html;
-}
-
-function decodeDrawingsBlock(pack) {
-  const urlBuilder = parser && typeof parser.bundledDrawingUrl === "function" ? parser.bundledDrawingUrl : null;
-  if (!pack || !Array.isArray(pack.files) || !pack.files.length) {
-    return `<p class="doc-sub">${escapeHtml((pack && pack.note) || "No drawing references.")}</p>`;
-  }
-  const bits = [];
-  if (pack.selectionSummary) bits.push(`<p class="doc-sub">${escapeHtml(pack.selectionSummary)}</p>`);
-  if (pack.primaryPdfRelPath && urlBuilder) {
-    const pr = urlBuilder(pack.primaryPdfRelPath);
-    if (pr) {
-      bits.push(
-        `<p class="doc-sub"><strong>Primary PDF:</strong> <a href="${escapeHtml(pr)}">${escapeHtml(pack.primaryPdfRelPath)}</a></p>`,
-      );
-    }
-  }
-  bits.push('<ul class="draw">');
-  for (const f of pack.files) {
-    const href = urlBuilder ? urlBuilder(f.relPath) : "";
-    const ty = escapeHtml(String(f.ext || "").toLowerCase());
-    const path = escapeHtml(f.relPath);
-    const link = href ? `<a href="${escapeHtml(href)}">${path}</a>` : path;
-    bits.push(`<li><strong>${ty}</strong> — ${link}</li>`);
-  }
-  bits.push("</ul>");
-  return bits.join("");
-}
-
 function reportFilenameStem(code) {
   const s = String(code || "coil")
     .trim()
@@ -389,119 +296,224 @@ function reportFilenameStem(code) {
   return s || "coil";
 }
 
-function buildStandaloneReportDocument() {
+function getJsPDFConstructor() {
+  if (window.jspdf && window.jspdf.jsPDF) return window.jspdf.jsPDF;
+  if (typeof window.jsPDF === "function") return window.jsPDF;
+  return null;
+}
+
+function screenshotFormatForPdf(dataUrl) {
+  const u = String(dataUrl || "").toLowerCase();
+  if (u.includes("image/jpeg") || u.includes("image/jpg")) return "JPEG";
+  return "PNG";
+}
+
+function addScreenshotToPdf(doc, dataUrl, marginLeft, startY) {
+  return new Promise((resolve) => {
+    if (!dataUrl || !/^data:image\//i.test(dataUrl)) {
+      resolve(startY);
+      return;
+    }
+    const im = new Image();
+    im.onload = () => {
+      try {
+        const nw = im.naturalWidth || im.width || 1;
+        const nh = im.naturalHeight || im.height || 1;
+        const maxW = 515;
+        const ew = Math.min(maxW, (nw * 72) / 96);
+        const eh = Math.max((nh * ew) / nw, 1);
+        let y = startY;
+        if (y + eh > 780) {
+          doc.addPage();
+          y = 48;
+        }
+        doc.addImage(dataUrl, screenshotFormatForPdf(dataUrl), marginLeft, y, ew, eh, undefined, "FAST");
+        resolve(y + eh + 16);
+      } catch (_) {
+        resolve(startY);
+      }
+    };
+    im.onerror = () => resolve(startY);
+    im.crossOrigin = "anonymous";
+    im.src = dataUrl;
+  });
+}
+
+async function mergeReportWithDrawingAppendix(reportArrayBuffer, drawingPdfUrl) {
+  const PDFDocument = PDFLib.PDFDocument;
+  const merged = await PDFDocument.create();
+  const first = await PDFDocument.load(reportArrayBuffer);
+  const aPages = await merged.copyPages(first, first.getPageIndices());
+  aPages.forEach((p) => merged.addPage(p));
+  const resp = await fetch(drawingPdfUrl, { mode: "cors", credentials: "same-origin" });
+  if (!resp.ok) throw new Error("drawing fetch failed");
+  const raw = await resp.arrayBuffer();
+  const second = await PDFDocument.load(raw);
+  const bPages = await merged.copyPages(second, second.getPageIndices());
+  bPages.forEach((p) => merged.addPage(p));
+  return merged.save();
+}
+
+async function buildCoilReportPdfBytes() {
   const res = reportSnapshot.decodeResult;
   const coil = String(reportSnapshot.coilCode || inputEl?.value?.trim() || "").trim();
-  if (!res || !res.ok) {
-    showToast("Decode a coil code first — then export the report.");
-    return "";
+  if (!res || !res.ok) return null;
+
+  const JsPDF = getJsPDFConstructor();
+  if (!JsPDF) {
+    showToast("PDF library failed to load — reload the page.");
+    return null;
   }
-  const when =
-    reportSnapshot.decodedAt
-      ? escapeHtml(new Date(reportSnapshot.decodedAt).toLocaleString())
-      : escapeHtml(new Date().toLocaleString());
-  const codeEsc = escapeHtml(coil || "(empty)");
-  const thumb = reportSnapshot.ocrDataUrl;
-  const ocrEsc = thumb
-    ? `<p class="source-tag">Screenshot: coil code below was recovered with on-page OCR (image attached).</p>
-       <div class="thumb-wrap"><img src="${escapeHtmlAttrDouble(thumb)}" alt="Screenshot used for OCR"/></div>`
-    : `<p class="source-tag">Coil code was entered manually (no OCR image in this session).</p>`;
+  const doc = new JsPDF({ unit: "pt", format: "a4", compress: true });
+  if (typeof doc.autoTable !== "function") {
+    showToast("PDF table plug-in missing — reload the page.");
+    return null;
+  }
+
+  const marg = 40;
+  let y = 48;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(14);
+  doc.text("DBM coil decode report", marg, y);
+  y += 24;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setTextColor(70);
+  const ts = reportSnapshot.decodedAt ? new Date(reportSnapshot.decodedAt).toLocaleString() : new Date().toLocaleString();
+  const disclaimer = doc.splitTextToSize(
+    `Generated ${ts}. Coil decoding and spreadsheet mapping are indicative only — verify naming and dimensions with factory documentation. When a primary drawing PDF is matched, the full document is appended after this summary.`,
+    515,
+  );
+  doc.text(disclaimer, marg, y);
+  y += disclaimer.length * 11 + 20;
+  doc.setTextColor(0);
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.text("Coil code", marg, y);
+  y += 16;
+  doc.setFont("courier", "normal");
+  doc.setFontSize(10);
+  const coilLines = doc.splitTextToSize(coil || "—", 515);
+  doc.text(coilLines, marg, y);
+  y += coilLines.length * 12 + 10;
+  doc.setFont("helvetica", "normal");
+
+  if (reportSnapshot.ocrDataUrl) {
+    doc.setFontSize(8);
+    doc.setTextColor(90);
+    doc.text("Screenshot used for OCR (image below).", marg, y);
+    y += 14;
+    doc.setTextColor(0);
+    y = await addScreenshotToPdf(doc, reportSnapshot.ocrDataUrl, marg, y);
+  }
+
+  y += 12;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.text("Field breakdown", marg, y);
+  y += 14;
+  doc.autoTable({
+    startY: y,
+    margin: { left: marg },
+    theme: "grid",
+    headStyles: { fillColor: [230, 235, 240], fontStyle: "bold", fontSize: 9 },
+    styles: { fontSize: 8, cellPadding: 4, overflow: "linebreak" },
+    columnStyles: { 3: { cellWidth: 230 } },
+    head: [["#", "Field", "Raw", "Meaning"]],
+    body: res.rows.map((r) => [String(r.position), r.label, r.raw ? String(r.raw) : "—", String(r.meaning || "")]),
+  });
+  y = doc.lastAutoTable.finalY + 22;
+
   const dim = res.dimensionHits;
-  const dimLine = dim
-    ? [
-        dim.geniox != null ? `Geniox ${dim.geniox}` : null,
-        dim.geometry || null,
-        dim.application || null,
-        dim.sheetName ? `sheet: ${dim.sheetName}` : null,
-        dim.layout || null,
-        dim.sourceRelPath || null,
-      ]
-        .filter(Boolean)
-        .join(" · ")
-    : "";
-  let dimIntro = "";
-  if (dim && (dimLine || dim.sourceUrl)) {
-    dimIntro = '<p class="doc-sub">';
-    if (dimLine) dimIntro += escapeHtml(dimLine);
-    if (dim.sourceUrl) {
-      dimIntro += `${dimLine ? " — " : ""}<a href="${escapeHtml(dim.sourceUrl)}">Open spreadsheet</a>`;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.text("Spreadsheet dimensions", marg, y);
+  y += 16;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+
+  if (
+    dim &&
+    Array.isArray(dim.matchedRows) &&
+    dim.matchedRows.length &&
+    Array.isArray(dim.headers) &&
+    dim.headers.length
+  ) {
+    const dimLine = [
+      dim.geniox != null ? `Geniox ${dim.geniox}` : null,
+      dim.geometry || null,
+      dim.application || null,
+      dim.sheetName ? `sheet: ${dim.sheetName}` : null,
+      dim.layout || null,
+      dim.sourceRelPath || null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    if (dimLine) {
+      const metaChunks = doc.splitTextToSize(dimLine, 515);
+      doc.text(metaChunks, marg, y);
+      y += metaChunks.length * 10 + 8;
     }
-    dimIntro += "</p>";
+    const { headers: dh, rows: dr } = trimEmptyDimensionColumns(dim.headers, dim.matchedRows);
+    doc.autoTable({
+      startY: y,
+      margin: { left: marg },
+      theme: "grid",
+      styles: { fontSize: 7, cellPadding: 3 },
+      headStyles: { fillColor: [230, 235, 240], fontSize: 8 },
+      head: [dh.map((h) => (h != null && String(h).trim() !== "" ? String(h) : ""))],
+      body: dr.map((row) => dh.map((_, jj) => (row[jj] != null && row[jj] !== "" ? String(row[jj]) : ""))),
+    });
+    y = doc.lastAutoTable.finalY + 12;
+    if (dim.note) {
+      doc.setFontSize(8);
+      const noteChunks = doc.splitTextToSize(String(dim.note), 515);
+      doc.text(noteChunks, marg, y);
+    }
+  } else {
+    const msg =
+      dim && dim.note
+        ? dim.note
+        : "No spreadsheet row matched bundled dimension tables for this Geniox geometry / circuits / connection.";
+    const msgChunks = doc.splitTextToSize(msg, 515);
+    doc.text(msgChunks, marg, y);
   }
 
-  const body = `
-    <header>
-      <h1>DBM coil decode report</h1>
-      <p class="doc-sub">Generated ${when} · For internal RFQ / submittal review — verify against factory drawings.</p>
-    </header>
-    <section>
-      <h2>Coil code</h2>
-      <div class="coil-line">${codeEsc}</div>
-      ${ocrEsc}
-    </section>
-    <section>
-      <h2>Field breakdown</h2>
-      ${decodeFieldTableHtml(res.rows)}
-    </section>
-    <section>
-      <h2>Spreadsheet dimensions</h2>
-      ${dimIntro}
-      ${decodeDimTableHtml(dim)}
-    </section>
-    <section>
-      <h2>Related drawings</h2>
-      ${decodeDrawingsBlock(res.drawingPack)}
-    </section>
-    <section>
-      <h2>RFQ text block</h2>
-      <pre class="rfq">${escapeHtml(res.supplierText || "")}</pre>
-    </section>
-    <p class="ft">Produced by the DBM coil code decoder.</p>`;
+  const pack = res.drawingPack;
+  const pdfAppendUrl = pack && pack.primaryPdfUrl ? String(pack.primaryPdfUrl) : "";
 
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>${escapeHtml((coil || "DBM coil report").slice(0, 72))}</title>
-  <style>${REPORT_DOC_STYLES}</style>
-</head>
-<body>
-  <div class="wrap">${body}</div>
-</body>
-</html>`;
-}
-
-function handleReportDownload() {
-  const html = buildStandaloneReportDocument();
-  if (!html) return;
-  const coil = reportSnapshot.coilCode || inputEl?.value?.trim() || "coil";
-  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = `dbm-coil-report-${reportFilenameStem(coil)}.html`;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 3000);
-  showToast("Report downloaded");
-}
-
-function handleReportPrint() {
-  const html = buildStandaloneReportDocument();
-  if (!html) return;
-  const w = window.open("", "_blank");
-  if (!w) {
-    showToast("Pop-up blocked — allow pop-ups for print.");
-    return;
+  const buf = doc.output("arraybuffer");
+  if (!window.PDFLib || !PDFLib.PDFDocument || !pdfAppendUrl) {
+    return new Uint8Array(buf);
   }
-  w.document.open();
-  w.document.write(html);
-  w.document.close();
-  w.focus();
-  setTimeout(() => {
-    try {
-      w.print();
-    } catch (_) {}
-  }, 350);
+  try {
+    return await mergeReportWithDrawingAppendix(buf, pdfAppendUrl);
+  } catch (e) {
+    if (window.console && console.warn) console.warn(e);
+    showToast("Could not attach drawing PDF — downloaded summary pages only.");
+    return new Uint8Array(buf);
+  }
+}
+
+async function handleReportPdfDownload() {
+  showToast("Building PDF…");
+  try {
+    const bytes = await buildCoilReportPdfBytes();
+    if (!bytes) return;
+    const coil = reportSnapshot.coilCode || inputEl?.value?.trim() || "coil";
+    const blob = new Blob([bytes], { type: "application/pdf" });
+    const a = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    a.href = url;
+    a.download = `dbm-coil-report-${reportFilenameStem(coil)}.pdf`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    showToast("PDF report downloaded");
+  } catch (e) {
+    if (window.console && console.warn) console.warn(e);
+    showToast("PDF build failed — try reloading the page.");
+  }
 }
 
 function renderDimensions(dimHits) {
@@ -750,8 +762,12 @@ btnClear.addEventListener("click", () => {
   inputEl.focus();
 });
 
-btnReportDownload?.addEventListener("click", handleReportDownload);
-btnReportPrint?.addEventListener("click", handleReportPrint);
+btnReportPdf?.addEventListener("click", () => {
+  handleReportPdfDownload().catch((e) => {
+    if (window.console && console.warn) console.warn(e);
+    showToast("PDF build failed.");
+  });
+});
 
 btnCopy.addEventListener("click", async () => {
   const text = summaryEl.value;
