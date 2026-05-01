@@ -91,6 +91,59 @@ input[type="text"]:focus {
   outline-offset: 1px;
 }
 
+input.fullwidth-input {
+  width: 100%;
+  flex: none;
+}
+
+.ref-list {
+  max-height: 420px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.ref-item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.4rem 0.65rem;
+  padding: 0.55rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.82rem;
+  align-items: start;
+}
+
+.ref-item:last-child {
+  border-bottom: none;
+}
+
+.ref-type {
+  font-family: ui-monospace, monospace;
+  font-weight: 600;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+
+.ref-path {
+  font-family: ui-monospace, monospace;
+  color: var(--muted);
+  word-break: break-all;
+}
+
+.ref-abs {
+  grid-column: 1 / -1;
+  font-family: ui-monospace, monospace;
+  font-size: 0.78rem;
+  color: #cbd5e1;
+  word-break: break-all;
+}
+
 button {
   font-family: var(--font);
   font-weight: 600;

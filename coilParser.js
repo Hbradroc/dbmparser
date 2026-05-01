@@ -82,26 +82,25 @@ const LOOKUPS = {
 };
 
 /**
- * Tube OD -> geometry/thickness mapping used by this decoder.
- * Thickness values reference GEO.COIL DLL documentation tables:
- * - P3012 section: 0.35, 0.40, 0.60 mm
- * - P40 section: 0.40, 0.60, 0.75, 1.00, 1.50 mm
- * - P60 section: 0.40, 0.60, 0.75, 1.00, 1.50 mm
+ * ManualeDBM (Calc98 User Guide) geometry definitions:
+ * - P3012: tube OD 12.45 mm (pitch 30 x 26 mm)
+ * - P40: tube OD 16.45 mm (pitch 40 x 34.64 mm)
+ * - P60: tube OD 16.45 mm (pitch 60 x 30 mm)
  */
-const TUBE_CODE_SPECS = {
-  "3": {
-    od: 'Tube OD 3/8"',
-    geometry: "P3012",
+const MANUAL_GEOMETRY_SPECS = {
+  P3012: {
+    tubeOdMm: "12.45",
+    pitchMm: "30 x 26",
     thicknessMm: "0.35 / 0.40 / 0.60",
   },
-  "4": {
-    od: 'Tube OD 1/2"',
-    geometry: "P40",
+  P40: {
+    tubeOdMm: "16.45",
+    pitchMm: "40 x 34.64",
     thicknessMm: "0.40 / 0.60 / 0.75 / 1.00 / 1.50",
   },
-  "5": {
-    od: 'Tube OD 5/8"',
-    geometry: "P60",
+  P60: {
+    tubeOdMm: "16.45",
+    pitchMm: "60 x 30",
     thicknessMm: "0.40 / 0.60 / 0.75 / 1.00 / 1.50",
   },
 };
@@ -197,7 +196,7 @@ function explainFinMaterial(raw) {
   return null;
 }
 
-function meaningForField(field, raw) {
+function meaningForField(field, raw, standardTokens = []) {
   if (raw == null || raw === "") return { text: "—", certain: true };
   const { key, lookup } = field;
   if (lookup && LOOKUPS[lookup]) {
@@ -219,11 +218,19 @@ function meaningForField(field, raw) {
     return { text: `${raw} (numeric segment)${dll}`, certain: true };
   }
   if (key === "tubeCode") {
-    const spec = TUBE_CODE_SPECS[String(raw).trim()] || null;
-    if (spec) {
+    const geom = String(standardTokens[0] || "").toUpperCase();
+    const gspec = MANUAL_GEOMETRY_SPECS[geom] || null;
+    if (gspec) {
       return {
-        text: `${spec.od}. Geometry ${spec.geometry}. Allowed tube thickness (mm): ${spec.thicknessMm} (per GEO.COIL DLL documentation tables).`,
+        text: `Geometry ${geom} (ManualeDBM): tube OD ${gspec.tubeOdMm} mm, tube pitch ${gspec.pitchMm} mm, allowed tube thickness (mm): ${gspec.thicknessMm}.`,
         certain: true,
+      };
+    }
+    const tube = lookupCategory("tubeCode", raw);
+    if (tube) {
+      return {
+        text: `${tube}. ManualeDBM ties tube OD to geometry selection (P3012/P40/P60), so confirm this numeric tube code against your project legend.`,
+        certain: false,
       };
     }
   }
@@ -261,13 +268,151 @@ function meaningForField(field, raw) {
   };
 }
 
+const DRAWING_STANDARD_GEOMS = ["P25", "P3012", "P40"];
+
+function getDrawingsCatalog() {
+  return Array.isArray(window.DBMM_COILS_DRAWINGS_INDEX) ? window.DBMM_COILS_DRAWINGS_INDEX : [];
+}
+
+/**
+ * First token is P25 / P3012 / P40 → maps to Coils drawings subfolders.
+ */
+function inferDrawingGeometry(tokens) {
+  const t0 = String(tokens[0] || "")
+    .toUpperCase()
+    .trim();
+  if (/^P25$/.test(t0)) return "P25";
+  if (/^P3012$/.test(t0)) return "P3012";
+  if (/^P40$/.test(t0)) return "P40";
+  return null;
+}
+
+/**
+ * Map coil family + medium to drawing application folders (matches folder names under P25/P3012/P40).
+ */
+function inferDrawingApplications(tokens) {
+  const coil = String(tokens[0] || "").toUpperCase();
+  const medium = String(tokens[2] || "").toUpperCase();
+
+  if (coil === "COH") return { apps: ["Heater"], note: null };
+  if (coil === "COK") return { apps: ["Cooler"], note: null };
+  if (/COND/.test(coil)) return { apps: ["Condenser"], note: null };
+  if (/EVAP|^DX|^ED/.test(coil)) return { apps: ["Evapurator"], note: null };
+
+  if (medium === "S") {
+    return { apps: ["Heater"], note: "Fluid code S: reference steam heater drawing sets (verify execution vs submittal)." };
+  }
+
+  const all = ["Heater", "Cooler", "Evapurator", "Condenser", "Changeover"];
+  return {
+    apps: all,
+    note: `Coil type "${tokens[0] || ""}" is not mapped to a single drawing family — listing all standard drawing packs for P25/P3012/P40 + Big Sizes matches. Narrow after you confirm cooler/heater/DX/condenser.`,
+  };
+}
+
+function bigSizeMatchesEntry(entry, geometryKey, apps) {
+  const n = String(entry.name || "").toUpperCase();
+  return apps.some((a) => {
+    if (a === "Changeover") return n.includes("CHANGEOVER");
+    if (a === "Cooler") return n.includes("COOLING");
+    if (a === "Evapurator") return n.includes("EVAPORATING");
+    if (a === "Heater") {
+      if (!geometryKey) return n.includes("HEATING");
+      return n.includes("HEATING") && n.endsWith(`-${geometryKey}.PDF`);
+    }
+    return false;
+  });
+}
+
+function selectDrawingReferences(tokens) {
+  const catalog = getDrawingsCatalog();
+  if (catalog.length === 0) {
+    return {
+      geometry: null,
+      applications: [],
+      files: [],
+      note: "Drawing index not loaded. Include coilsDrawingsIndex.js (local) or coils-drawings-index.json on a web server.",
+    };
+  }
+
+  const geometryKey = inferDrawingGeometry(tokens);
+  const { apps, note: appNote } = inferDrawingApplications(tokens);
+  const geomsToScan = geometryKey ? [geometryKey] : DRAWING_STANDARD_GEOMS;
+
+  const picked = [];
+  for (const g of geomsToScan) {
+    for (const entry of catalog) {
+      if (entry.geometry !== g) continue;
+      if (!apps.includes(entry.application)) continue;
+      picked.push(entry);
+    }
+  }
+
+  const bigOnes = catalog.filter((e) => e.geometry === "Big Sizes (35-44)" && bigSizeMatchesEntry(e, geometryKey, apps));
+  for (const b of bigOnes) {
+    picked.push(b);
+  }
+
+  const seen = new Set();
+  const files = [];
+  for (const p of picked) {
+    if (seen.has(p.relPath)) continue;
+    seen.add(p.relPath);
+    files.push(p);
+  }
+
+  files.sort((a, b) => {
+    const ga = String(a.geometry);
+    const gb = String(b.geometry);
+    if (ga !== gb) return ga.localeCompare(gb);
+    const aa = String(a.application);
+    const ab = String(b.application);
+    if (aa !== ab) return aa.localeCompare(ab);
+    return String(a.name).localeCompare(String(b.name));
+  });
+
+  return {
+    geometry: geometryKey,
+    applications: apps,
+    files,
+    note: appNote,
+  };
+}
+
+function appendDrawingRefsToSummary(lines, pack) {
+  lines.push("COILS DRAWINGS (indexed from local “Coils drawings” folder)");
+  lines.push("---------------------------------------------------------");
+  if (!pack || !pack.files || pack.files.length === 0) {
+    lines.push(pack && pack.note ? pack.note : "No drawing references available.");
+    lines.push("");
+    return;
+  }
+  lines.push(
+    `Filtered geometry: ${pack.geometry || "P25 + P3012 + P40 (all)"} | Applications: ${pack.applications.join(", ")}`,
+  );
+  if (pack.note) lines.push(`Note: ${pack.note}`);
+  lines.push(`Files (${pack.files.length}):`);
+  for (const f of pack.files) {
+    lines.push(`- [${f.ext === ".xlsx" ? "XLSX" : "PDF"}] ${f.relPath}`);
+  }
+  lines.push("");
+}
+
 /**
  * Optional trailing tokens after the 12 standard positions (e.g. D2, tt, connection notes).
  */
 function parseCoilCode(input) {
   const tokens = tokenize(input);
   if (tokens.length === 0) {
-    return { ok: false, error: "Enter a coil code.", tokens: [], rows: [], extra: [], supplierText: "" };
+    return {
+      ok: false,
+      error: "Enter a coil code.",
+      tokens: [],
+      rows: [],
+      extra: [],
+      supplierText: "",
+      drawingPack: { files: [], note: null, geometry: null, applications: [] },
+    };
   }
 
   const standardCount = STANDARD_FIELDS.length;
@@ -276,7 +421,7 @@ function parseCoilCode(input) {
 
   const rows = STANDARD_FIELDS.map((field, i) => {
     const raw = standardTokens[i] ?? "";
-    const m = meaningForField(field, raw);
+    const m = meaningForField(field, raw, standardTokens);
     return {
       position: i + 1,
       key: field.key,
@@ -304,7 +449,8 @@ function parseCoilCode(input) {
   });
 
   const allRows = rows.concat(extraRows);
-  const supplierText = buildSupplierSummary(input, allRows);
+  const drawingPack = selectDrawingReferences(tokens);
+  const supplierText = buildSupplierSummary(input, allRows, drawingPack);
 
   return {
     ok: true,
@@ -313,10 +459,11 @@ function parseCoilCode(input) {
     rows: allRows,
     extra,
     supplierText,
+    drawingPack,
   };
 }
 
-function buildSupplierSummary(original, rows) {
+function buildSupplierSummary(original, rows, drawingPack) {
   const lines = [
     "COIL ORDER / RFQ SUMMARY (decode from DBM-style code — verify before order)",
     "================================================================",
@@ -339,6 +486,7 @@ function buildSupplierSummary(original, rows) {
   );
   lines.push("- Confirm handing, connections, casing sides, and design duty (kW / kPa / flow) separately.");
   lines.push("- Hyphen decoding here is positional help only; drawings and DBM order confirmation prevail.");
+  appendDrawingRefsToSummary(lines, drawingPack);
   return lines.join("\n");
 }
 
@@ -351,4 +499,7 @@ window.DBM_PARSER = {
   normalizeInput,
   tokenize,
   parseCoilCode,
+  selectDrawingReferences,
+  inferDrawingGeometry,
+  inferDrawingApplications,
 };

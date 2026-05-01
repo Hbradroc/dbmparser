@@ -12,9 +12,21 @@ const tableBody = $("#decode-body");
 const segmentsEl = $("#segments");
 const summaryEl = $("#supplier-summary");
 const toastEl = $("#toast");
+const drawingsRootEl = $("#drawings-root");
+const drawingsMetaEl = $("#drawings-meta");
+const drawingsListEl = $("#drawings-list");
+
+const LS_DRAWINGS_ROOT = "dbmCoilsDrawingsRoot";
 
 const parser = window.DBM_PARSER;
 const parseCoilCode = parser && typeof parser.parseCoilCode === "function" ? parser.parseCoilCode : null;
+
+function joinDrawingsPath(root, relPath) {
+  const r = String(root || "").trim().replace(/[\\/]+$/, "");
+  if (!r) return "";
+  const sub = String(relPath || "").replace(/\//g, "\\");
+  return r + "\\" + sub;
+}
 
 function showToast(msg) {
   toastEl.textContent = msg;
@@ -60,6 +72,42 @@ function escapeHtml(s) {
     .replace(/"/g, "&quot;");
 }
 
+function renderDrawingRefs(pack, rootHint) {
+  drawingsListEl.innerHTML = "";
+  if (!pack || !pack.files || pack.files.length === 0) {
+    drawingsMetaEl.textContent =
+      pack && pack.note
+        ? pack.note
+        : "No drawings matched. Paste a coil code and decode.";
+    return;
+  }
+  const geoLine = pack.geometry || "all standard (P25 + P3012 + P40)";
+  const appsLine = (pack.applications || []).join(", ");
+  drawingsMetaEl.textContent = `Geometry filter: ${geoLine} • Drawing sets: ${appsLine}${
+    pack.note ? " — " + pack.note : ""
+  }`;
+  const root = (rootHint != null ? rootHint : drawingsRootEl && drawingsRootEl.value) || "";
+
+  const ul = document.createElement("ul");
+  ul.className = "ref-list";
+  for (const f of pack.files) {
+    const ty = String(f.ext || "").toLowerCase() === ".xlsx" ? "xlsx" : "pdf";
+    const abs = joinDrawingsPath(root, f.relPath);
+    const li = document.createElement("li");
+    li.className = "ref-item";
+    li.innerHTML = `
+      <span class="ref-type">${escapeHtml(ty)}</span>
+      <span class="ref-path" title="${escapeHtml(f.relPath)}">${escapeHtml(f.relPath)}</span>
+      ${
+        abs
+          ? `<span class="ref-abs" title="${escapeHtml(abs)}">${escapeHtml(abs)}</span>`
+          : `<span class="ref-abs">${escapeHtml("Set folder path above for a full Windows path.")}</span>`
+      }`;
+    ul.appendChild(li);
+  }
+  drawingsListEl.appendChild(ul);
+}
+
 function decode() {
   errEl.textContent = "";
   if (!parseCoilCode) {
@@ -73,14 +121,29 @@ function decode() {
     segmentsEl.innerHTML = "";
     tableBody.innerHTML = "";
     summaryEl.value = "";
+    renderDrawingRefs(null, drawingsRootEl.value);
     return;
   }
   renderSegments(result.tokens);
   renderTable(result.rows);
   summaryEl.value = result.supplierText;
+  renderDrawingRefs(result.drawingPack, drawingsRootEl.value);
 }
 
 btnDecode.addEventListener("click", decode);
+
+if (drawingsRootEl) {
+  try {
+    const saved = localStorage.getItem(LS_DRAWINGS_ROOT);
+    if (saved) drawingsRootEl.value = saved;
+  } catch (_) {}
+  drawingsRootEl.addEventListener("change", () => {
+    try {
+      localStorage.setItem(LS_DRAWINGS_ROOT, drawingsRootEl.value.trim());
+    } catch (_) {}
+    decode();
+  });
+}
 
 btnClear.addEventListener("click", () => {
   inputEl.value = "";
@@ -88,6 +151,7 @@ btnClear.addEventListener("click", () => {
   segmentsEl.innerHTML = "";
   tableBody.innerHTML = "";
   summaryEl.value = "";
+  renderDrawingRefs(null, drawingsRootEl.value);
   inputEl.focus();
 });
 

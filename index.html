@@ -10,9 +10,9 @@
     <main>
       <h1>DBM coil code decoder</h1>
       <p class="sub">
-        Paste a hyphenated coil string from the submittal. The decoder uses <strong>positional fields</strong> and, where
-        values line up, cites <strong>DBM GEO.COIL / Calc98 DLL</strong> tables (geometry, fin pitch, manifold sizes, etc.)
-        from vendor documentation. Extend <code>coilParser.js</code> for codes that are purely drawing-specific.
+        Paste a hyphenated coil string from the submittal. Lists reference <strong>Coils drawings</strong> PDF/XLSX
+        (indexed from your workspace) plus GEO.COIL manual/DLL hints. Extend <code>coilParser.js</code> for custom
+        family codes like <code>GXK</code>.
       </p>
 
       <section class="panel" aria-labelledby="decode-heading">
@@ -47,6 +47,23 @@
           </thead>
           <tbody id="decode-body"></tbody>
         </table>
+      </section>
+
+      <section class="panel" aria-labelledby="drawings-heading">
+        <h2 id="drawings-heading" style="font-size: 1.05rem; margin: 0 0 0.65rem">Coils drawings references</h2>
+        <label class="display" for="drawings-root"
+          >Path to “Coils drawings” folder on this PC (optional — builds full paths to open files)</label
+        >
+        <input
+          id="drawings-root"
+          type="text"
+          spellcheck="false"
+          autocomplete="off"
+          placeholder="e.g. C:\...\Documents\MATLAB\DBM\Coils drawings"
+          class="fullwidth-input"
+        />
+        <p id="drawings-meta" class="sub" style="margin: 0.5rem 0 0.75rem"></p>
+        <div id="drawings-list" class="ref-list" aria-live="polite"></div>
       </section>
 
       <section class="panel" aria-labelledby="summary-heading">
@@ -85,7 +102,8 @@
       }
     </style>
 
-    <script defer src="coilParser.js?v=20260501b"></script>
-    <script defer src="app.js?v=20260501b"></script>
+    <script defer src="coilParser.js?v=20260501c"></script>
+    <script defer src="coilsDrawingsIndex.js?v=20260501c"></script>
+    <script defer src="app.js?v=20260501c"></script>
   </body>
 </html>
