@@ -1,3 +1,6 @@
+if (!window.__DBM_APP_INIT__) {
+  window.__DBM_APP_INIT__ = true;
+
 const $ = (sel) => document.querySelector(sel);
 
 const inputEl = $("#coil-input");
@@ -118,3 +121,4 @@ inputEl.value =
 decode();
 
 window.DBM_COIL = window.DBM_PARSER || {};
+}
