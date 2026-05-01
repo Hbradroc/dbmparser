@@ -10,8 +10,8 @@
     <main>
       <h1>DBM coil code decoder</h1>
       <p class="sub">
-        Paste a hyphenated coil string from the submittal. Lists reference <strong>Coils drawings</strong> PDF/XLSX
-        (indexed from your workspace) plus GEO.COIL manual/DLL hints. Extend <code>coilParser.js</code> for custom
+        Paste a hyphenated coil string from the submittal.         Drawing PDFs/XLSX are hosted in-repo under <code>drawings/</code> (indexed list + links). GEO.COIL manual/DLL
+        hints as before. Extend <code>coilParser.js</code> for custom
         family codes like <code>GXK</code>.
       </p>
 
@@ -52,14 +52,14 @@
       <section class="panel" aria-labelledby="drawings-heading">
         <h2 id="drawings-heading" style="font-size: 1.05rem; margin: 0 0 0.65rem">Coils drawings references</h2>
         <label class="display" for="drawings-root"
-          >Path to “Coils drawings” folder on this PC (optional — builds full paths to open files)</label
+          >Optional: Windows path to a local copy of <code>drawings</code> (only to show “Local:” paths in the list)</label
         >
         <input
           id="drawings-root"
           type="text"
           spellcheck="false"
           autocomplete="off"
-          placeholder="e.g. C:\...\Documents\MATLAB\DBM\Coils drawings"
+          placeholder="Leave empty if you only use the “Open on this site” links"
           class="fullwidth-input"
         />
         <p id="drawings-meta" class="sub" style="margin: 0.5rem 0 0.75rem"></p>
@@ -102,8 +102,8 @@
       }
     </style>
 
-    <script defer src="coilParser.js?v=20260501d"></script>
-    <script defer src="coilsDrawingsIndex.js?v=20260501c"></script>
-    <script defer src="app.js?v=20260501d"></script>
+    <script defer src="coilParser.js?v=20260501e"></script>
+    <script defer src="coilsDrawingsIndex.js?v=20260501e"></script>
+    <script defer src="app.js?v=20260501e"></script>
   </body>
 </html>

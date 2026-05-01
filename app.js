@@ -74,6 +74,7 @@ function escapeHtml(s) {
 
 function renderDrawingRefs(pack, rootHint) {
   drawingsListEl.innerHTML = "";
+  const urlBuilder = parser && typeof parser.bundledDrawingUrl === "function" ? parser.bundledDrawingUrl : null;
   if (!pack || !pack.files || pack.files.length === 0) {
     drawingsMetaEl.textContent =
       pack && pack.note
@@ -83,7 +84,11 @@ function renderDrawingRefs(pack, rootHint) {
   }
   const geoLine = pack.geometry || "all standard (P25 + P3012 + P40)";
   const appsLine = (pack.applications || []).join(", ");
-  drawingsMetaEl.textContent = `Geometry filter: ${geoLine} • Drawing sets: ${appsLine}${
+  const baseHint =
+    parser && typeof parser.bundledDrawingsBaseUrl === "function"
+      ? String(parser.bundledDrawingsBaseUrl() || "").replace(/\/?$/, "/")
+      : "";
+  drawingsMetaEl.textContent = `Same-site files under ./drawings/ ${baseHint ? "(" + baseHint + ")" : ""} • Geometry filter: ${geoLine} • Drawing sets: ${appsLine}${
     pack.note ? " — " + pack.note : ""
   }`;
   const root = (rootHint != null ? rootHint : drawingsRootEl && drawingsRootEl.value) || "";
@@ -93,16 +98,29 @@ function renderDrawingRefs(pack, rootHint) {
   for (const f of pack.files) {
     const ty = String(f.ext || "").toLowerCase() === ".xlsx" ? "xlsx" : "pdf";
     const abs = joinDrawingsPath(root, f.relPath);
+    const hosted = urlBuilder ? urlBuilder(f.relPath) : "";
     const li = document.createElement("li");
     li.className = "ref-item";
+    const linkRow =
+      hosted
+        ? `<a class="ref-link" href="${escapeHtml(hosted)}" target="_blank" rel="noopener noreferrer">Open on this site</a>`
+        : "";
+    const localRow =
+      abs
+        ? `<span class="ref-abs local-path" title="${escapeHtml(abs)}">Local: ${escapeHtml(abs)}</span>`
+        : "";
+    const localHint =
+      !abs && drawingsRootEl
+        ? `<span class="ref-abs muted">Optional: set folder path below to show a Windows path.</span>`
+        : "";
+
     li.innerHTML = `
       <span class="ref-type">${escapeHtml(ty)}</span>
-      <span class="ref-path" title="${escapeHtml(f.relPath)}">${escapeHtml(f.relPath)}</span>
-      ${
-        abs
-          ? `<span class="ref-abs" title="${escapeHtml(abs)}">${escapeHtml(abs)}</span>`
-          : `<span class="ref-abs">${escapeHtml("Set folder path above for a full Windows path.")}</span>`
-      }`;
+      <div class="ref-body">
+        <span class="ref-path" title="${escapeHtml(f.relPath)}">${escapeHtml(f.relPath)}</span>
+        ${linkRow ? `<div class="ref-row">${linkRow}</div>` : ""}
+        ${localRow || localHint}
+      </div>`;
     ul.appendChild(li);
   }
   drawingsListEl.appendChild(ul);

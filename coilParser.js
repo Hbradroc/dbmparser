@@ -388,8 +388,35 @@ function selectDrawingReferences(tokens) {
   };
 }
 
+function encodeDrawingPathSegments(relPath) {
+  return String(relPath || "")
+    .split("/")
+    .map((s) => encodeURIComponent(s))
+    .join("/");
+}
+
+/** Base URL for drawing files bundled next to index as ./drawings/ (GitHub Pages + local server). */
+function bundledDrawingsBaseUrl() {
+  if (typeof window === "undefined" || !window.location || !window.location.href) return "";
+  try {
+    return new URL("./drawings/", window.location.href).href;
+  } catch (_) {
+    return "";
+  }
+}
+
+function bundledDrawingUrl(relPath) {
+  const base = bundledDrawingsBaseUrl();
+  if (!base || !relPath) return "";
+  try {
+    return new URL(encodeDrawingPathSegments(relPath), base).href;
+  } catch (_) {
+    return "";
+  }
+}
+
 function appendDrawingRefsToSummary(lines, pack) {
-  lines.push("COILS DRAWINGS (indexed from local “Coils drawings” folder)");
+  lines.push('COILS DRAWINGS (repo / site: path "drawings/<relPath>" under this app)');
   lines.push("---------------------------------------------------------");
   if (!pack || !pack.files || pack.files.length === 0) {
     lines.push(pack && pack.note ? pack.note : "No drawing references available.");
@@ -400,9 +427,15 @@ function appendDrawingRefsToSummary(lines, pack) {
     `Filtered geometry: ${pack.geometry || "P25 + P3012 + P40 (all)"} | Applications: ${pack.applications.join(", ")}`,
   );
   if (pack.note) lines.push(`Note: ${pack.note}`);
-  lines.push(`Files (${pack.files.length}):`);
+  lines.push(`Files (${pack.files.length}) — URLs resolve from "./drawings/" next to index.html`);
+  const wantUrls = typeof window !== "undefined" && window.location;
   for (const f of pack.files) {
-    lines.push(`- [${f.ext === ".xlsx" ? "XLSX" : "PDF"}] ${f.relPath}`);
+    const tag = f.ext === ".xlsx" ? "XLSX" : "PDF";
+    lines.push(`- [${tag}] ${f.relPath}`);
+    if (wantUrls) {
+      const url = bundledDrawingUrl(f.relPath);
+      if (url) lines.push(`  ${url}`);
+    }
   }
   lines.push("");
 }
@@ -511,4 +544,7 @@ window.DBM_PARSER = {
   selectDrawingReferences,
   inferDrawingGeometry,
   inferDrawingApplications,
+  bundledDrawingsBaseUrl,
+  bundledDrawingUrl,
+  encodeDrawingPathSegments,
 };

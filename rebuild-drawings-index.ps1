@@ -1,9 +1,9 @@
-# Re-scan ../Coils drawings and refresh coils-drawings-index.json + coilsDrawingsIndex.js
+# Re-scan ./drawings (repo-hosted; sync from DBM workspace) + refresh index JSON/JS.
 $ErrorActionPreference = "Stop"
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
-$root = Join-Path (Split-Path -Parent $here) "Coils drawings"
+$root = Join-Path $here "drawings"
 if (!(Test-Path $root)) {
-  Write-Error "Coils drawings folder not found next to coil-code-app: $root"
+  Write-Error "drawings folder not found under coil-code-app: $root"
 }
 
 function Infer-BigSizesApp([string]$name) {
