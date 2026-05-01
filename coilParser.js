@@ -108,13 +108,13 @@ const MANUAL_GEOMETRY_SPECS = {
 /** Positions after splitting on "-" (0-based), for the long "detailed" code form */
 const STANDARD_FIELDS = [
   { key: "coilType", label: "Coil type", lookup: "coilType" },
-  { key: "size", label: "Coil size / face reference", lookup: null },
+  { key: "size", label: "Geniox size", lookup: null },
   { key: "medium", label: "Medium", lookup: "medium" },
   { key: "tubeCode", label: "Tube diameter code", lookup: "tubeCode" },
   { key: "rows", label: "Number of rows", lookup: null },
   { key: "circuits", label: "Number of circuits", lookup: null },
-  { key: "finDim1", label: "Fin pack dimension 1 (mm or code per legend)", lookup: null },
-  { key: "finDim2", label: "Fin pack dimension 2 (mm or code per legend)", lookup: null },
+  { key: "finDim1", label: "Fin height (mm)", lookup: null },
+  { key: "finDim2", label: "Fin length (mm)", lookup: null },
   {
     key: "finPitch",
     label: "Fin spacing / pitch (mm)",
@@ -208,7 +208,10 @@ function meaningForField(field, raw, standardTokens = []) {
     if (ex) return { text: ex, certain: false };
   }
   if (key === "size" && /^\d+$/.test(raw)) {
-    return { text: `Size reference ${raw} (numeric code from product family)`, certain: false };
+    return {
+      text: `Geniox size code ${raw} (numeric cabinet / coil size class on submittal — match to Geniox sizing tables)`,
+      certain: false,
+    };
   }
   if ((key === "rows" || key === "circuits") && /^\d+$/.test(raw)) {
     const dll =
@@ -234,9 +237,15 @@ function meaningForField(field, raw, standardTokens = []) {
       };
     }
   }
-  if ((key === "finDim1" || key === "finDim2") && /^\d+(\.\d+)?$/.test(raw)) {
+  if (key === "finDim1" && /^\d+(\.\d+)?$/.test(raw)) {
     return {
-      text: `${raw} — typically fin pack length/width or net fin length in mm (verify units on drawing)`,
+      text: `${raw} mm — fin height (vertical finned dimension; confirm on Coils drawings / submittal)`,
+      certain: false,
+    };
+  }
+  if (key === "finDim2" && /^\d+(\.\d+)?$/.test(raw)) {
+    return {
+      text: `${raw} mm — fin length (horizontal finned dimension along air path; confirm on Coils drawings / submittal)`,
       certain: false,
     };
   }
