@@ -640,6 +640,8 @@ function getJsPDFConstructor() {
   return null;
 }
 
+const PDF_REPORT_TITLE = "Heat Exchanger Coils RFQ Report";
+
 /** Report visual theme (aligned with app accent / slate neutrals). */
 const PDF_THEME = {
   ink: [15, 23, 42],
@@ -668,17 +670,17 @@ function drawPdfHeroHeader(doc, marg, ts) {
   doc.rect(0, 78, pw, 3.2, "F");
   doc.setTextColor(255, 255, 255);
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(20);
-  doc.text("DBM coil decode report", marg, 38);
+  doc.setFontSize(18);
+  doc.text(doc.splitTextToSize(PDF_REPORT_TITLE, pw - marg * 2), marg, 34);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10.5);
   doc.setTextColor(...PDF_THEME.bandSub);
   const sub = "Structured field breakdown · spreadsheet dimensions · primary drawing appendix";
-  doc.text(doc.splitTextToSize(sub, pw - marg * 2), marg, 54);
+  doc.text(doc.splitTextToSize(sub, pw - marg * 2), marg, 56);
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(9);
   doc.setFont("helvetica", "italic");
-  doc.text(ts, pw - marg, 38, { align: "right" });
+  doc.text(ts, pw - marg, 22, { align: "right" });
   doc.setFont("helvetica", "normal");
   doc.setTextColor(...PDF_THEME.bodyText);
   return 98;
@@ -710,7 +712,9 @@ function stampSummaryPageFooters(doc, marg) {
     doc.setTextColor(...PDF_THEME.muted);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(8);
-    doc.text(`DBM coil decode · Summary ${i} / ${n}`, marg, ph - 24);
+    const footLines = doc.splitTextToSize(`${PDF_REPORT_TITLE} · ${i} / ${n}`, pw - marg * 2);
+    const footY = ph - 24 - (footLines.length - 1) * 10;
+    doc.text(footLines, marg, footY);
   }
 }
 
@@ -751,15 +755,6 @@ async function buildCoilReportPdfBytes() {
   const ts = reportSnapshot.decodedAt ? new Date(reportSnapshot.decodedAt).toLocaleString() : new Date().toLocaleString();
   let y = drawPdfHeroHeader(doc, marg, ts);
 
-  doc.setTextColor(...PDF_THEME.muted);
-  doc.setFont("helvetica", "italic");
-  doc.setFontSize(9);
-  const disclaimer = doc.splitTextToSize(
-    `This summary is indicative only — confirm naming, materials, manifold sizes, and all dimensions against source XLS drawings and Calc98/factory releases. Pages after this summary may include the full primary coil drawing PDF.`,
-    innerW,
-  );
-  doc.text(disclaimer, marg, y);
-  y += disclaimer.length * 12 + 26;
   doc.setFont("helvetica", "normal");
   doc.setTextColor(...PDF_THEME.bodyText);
 
@@ -958,7 +953,7 @@ async function handleReportPdfDownload() {
     const a = document.createElement("a");
     const url = URL.createObjectURL(blob);
     a.href = url;
-    a.download = `dbm-coil-report-${reportFilenameStem(coil)}.pdf`;
+    a.download = `heat-exchanger-coils-rfq-report-${reportFilenameStem(coil)}.pdf`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 5000);
     showToast("PDF report downloaded");
