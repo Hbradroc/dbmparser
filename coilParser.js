@@ -227,8 +227,15 @@ function meaningForField(field, raw, standardTokens = []) {
     if (ex) return { text: ex, certain: false };
   }
   if (key === "size" && /^\d+$/.test(raw)) {
+    const n = parseInt(raw, 10);
+    const bigHint =
+      Number.isFinite(n) && n >= BIG_SIZES_GENIOX_MIN
+        ? ` Size ≥ ${BIG_SIZES_GENIOX_MIN}: use drawings folder "Big Sizes (35–44)" for coil brochures (sizes ≤31 rely on P25/P3012/P40 sets).`
+        : Number.isFinite(n)
+          ? ` Size ≤ ${BIG_SIZES_GENIOX_MIN - 1}: standard geometry folders only (unless GXHK changeover).`
+          : "";
     return {
-      text: `Geniox size code ${raw} (numeric cabinet / coil size class on submittal — match to Geniox sizing tables)`,
+      text: `Geniox size code ${raw} (cabinet/coil size class — match Geniox tables).${bigHint}`,
       certain: false,
     };
   }
@@ -306,12 +313,22 @@ function getDrawingsCatalog() {
   return Array.isArray(window.DBMM_COILS_DRAWINGS_INDEX) ? window.DBMM_COILS_DRAWINGS_INDEX : [];
 }
 
+/** Geniox sizes above this use drawings under "Big Sizes (35–44)" in addition to geometry rules (field 2). */
+const BIG_SIZES_GENIOX_MIN = 32;
+
 /** Tube diameter code (field 4, 1-based position) → drawings root folder name. */
 const TUBE_CODE_TO_DRAWING_GEOM = {
   "3": "P25",
   "4": "P3012",
   "5": "P40",
 };
+
+function inferGenioxSize(tokens) {
+  const s = tokens[1] != null ? String(tokens[1]).trim() : "";
+  const n = parseInt(s, 10);
+  if (!Number.isFinite(n) || s === "") return null;
+  return n;
+}
 
 /**
  * Coils drawings folder: explicit P25/P3012/P40 prefix, else Geniox tube code digit in field 4.
@@ -411,14 +428,22 @@ function bigSizeMatchesEntry(entry, geometryKey, apps) {
 }
 
 /** First representative PDF for on-page preview (skip Reference packs and XLSX). */
-function pickPrimaryDrawingPdf(files) {
+function pickPrimaryDrawingPdf(files, options = {}) {
+  const preferBig = Boolean(options.preferBigSizes);
   if (!files || !files.length) return null;
   const candidates = files.filter((f) => String(f.ext || "").toLowerCase() === ".pdf" && f.geometry !== "Reference");
   if (!candidates.length) return null;
-  const page1 = candidates.find((f) => /(^|_)PAGE_1\.PDF$/i.test(String(f.name || "")));
+
+  let pool = candidates;
+  if (preferBig) {
+    const big = candidates.filter((f) => f.geometry === "Big Sizes (35-44)");
+    if (big.length) pool = big;
+  }
+
+  const page1 = pool.find((f) => /(^|_)PAGE_1\.PDF$/i.test(String(f.name || "")));
   if (page1) return page1;
-  candidates.sort((a, b) => String(a.relPath || "").localeCompare(String(b.relPath || "")));
-  return candidates[0];
+  pool.sort((a, b) => String(a.relPath || "").localeCompare(String(b.relPath || "")));
+  return pool[0];
 }
 
 function selectDrawingReferences(tokens) {
@@ -433,9 +458,15 @@ function selectDrawingReferences(tokens) {
   }
 
   const geometryKey = inferDrawingGeometry(tokens);
+  const genioxN = inferGenioxSize(tokens);
   const { apps, note: appNote } = inferDrawingApplications(tokens);
   const geomsToScan = geometryKey ? [geometryKey] : DRAWING_STANDARD_GEOMS;
   const appsForPacks = apps.filter((a) => a !== "Changeover");
+  const solelyChangeover = apps.length === 1 && apps[0] === "Changeover";
+
+  /** Big Sizes brochures for heater/cooler/evap/etc. apply only above Geniox 31; GXHK changeover stays on Big Sizes at any numeric size. */
+  const mergeBigSizesPacks =
+    solelyChangeover || (genioxN != null && genioxN >= BIG_SIZES_GENIOX_MIN);
 
   const picked = [];
   for (const g of geomsToScan) {
@@ -446,7 +477,8 @@ function selectDrawingReferences(tokens) {
     }
   }
 
-  const bigOnes = catalog.filter((e) => e.geometry === "Big Sizes (35-44)" && bigSizeMatchesEntry(e, geometryKey, apps));
+  let bigOnes = catalog.filter((e) => e.geometry === "Big Sizes (35-44)" && bigSizeMatchesEntry(e, geometryKey, apps));
+  if (!mergeBigSizesPacks) bigOnes = [];
   for (const b of bigOnes) {
     picked.push(b);
   }
@@ -466,9 +498,16 @@ function selectDrawingReferences(tokens) {
     files.push(r);
   }
 
+  const preferBigForPreview =
+    mergeBigSizesPacks && Boolean(bigOnes.length);
   files.sort((a, b) => {
-    const ra = a.geometry === "Reference" ? 1 : 0;
-    const rb = b.geometry === "Reference" ? 1 : 0;
+    const ra = a.geometry === "Reference" ? 2 : 0;
+    const rb = b.geometry === "Reference" ? 2 : 0;
+    const ba =
+      preferBigForPreview && a.geometry === "Big Sizes (35-44)" ? 0 : 1;
+    const bb =
+      preferBigForPreview && b.geometry === "Big Sizes (35-44)" ? 0 : 1;
+    if (ba !== bb) return ba - bb;
     if (ra !== rb) return ra - rb;
     const ga = String(a.geometry);
     const gb = String(b.geometry);
@@ -480,8 +519,17 @@ function selectDrawingReferences(tokens) {
   });
 
   const tubeHint = geometryKey ? geometryKey : "field 4 not 3|4|5 — pick geometry manually";
-  const selectionSummary = `Drawings narrowed by coil prefix (${String(tokens[0] || "").toUpperCase()}), medium (field 3), and tube / folder geometry ${tubeHint}.`;
-  const primary = pickPrimaryDrawingPdf(files);
+  const sizeHint =
+    genioxN == null
+      ? "Geniox size unset/* — assuming standard folders only unless GXHK."
+      : genioxN >= BIG_SIZES_GENIOX_MIN || solelyChangeover
+        ? `Geniox ${genioxN}: include "Big Sizes (35–44)" brochures where they match.${solelyChangeover && genioxN != null && genioxN < BIG_SIZES_GENIOX_MIN ? " GXHK keeps changeover pack for any size." : ""}`
+        : `Geniox ${genioxN}: use P25/P3012/P40 folders only (no Big Sizes heater/cooler packs).`;
+
+  const selectionSummary = `Drawings narrowed by coil prefix (${String(tokens[0] || "").toUpperCase()}), medium (field 3), tube/folder geometry ${tubeHint}. ${sizeHint}`;
+  const primary = pickPrimaryDrawingPdf(files, {
+    preferBigSizes: preferBigForPreview || solelyChangeover,
+  });
   const primaryPdfRelPath = primary ? primary.relPath : null;
   const primaryPdfUrl = primaryPdfRelPath ? bundledDrawingUrl(primaryPdfRelPath) : "";
 

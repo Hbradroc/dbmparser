@@ -12,8 +12,10 @@
       <p class="sub">
         Paste a hyphenated coil string from the submittal. Drawing logic: <strong>GXH</strong> → heating /
         Heater folder, <strong>GXK</strong> → cooling (<strong>W</strong> → Cooler, <strong>D…</strong> DX → Evapurator),
-        <strong>GXHK</strong> → changeover + Big Sizes pack. Field <strong>4</strong> tube digit <strong>3|4|5</strong>
-        selects <strong>P25|P3012|P40</strong> folders. Hosted under <code>drawings/</code>.
+        <strong>GXHK</strong> → changeover (Big Sizes changeover pack). Field <strong>4</strong> tube digit
+        <strong>3|4|5</strong> selects <strong>P25|P3012|P40</strong>. <strong>Geniox size ≥ 32</strong> (field 2) also pulls
+        brochures from <strong>Big Sizes (35–44)</strong>; <strong>≤ 31</strong> uses those geometry folders only (except GXHK).
+        Hosted under <code>drawings/</code>.
       </p>
 
       <section class="panel" aria-labelledby="decode-heading">
@@ -112,8 +114,8 @@
       }
     </style>
 
-    <script defer src="coilParser.js?v=20260501h"></script>
-    <script defer src="coilsDrawingsIndex.js?v=20260501h"></script>
-    <script defer src="app.js?v=20260501h"></script>
+    <script defer src="coilParser.js?v=20260501i"></script>
+    <script defer src="coilsDrawingsIndex.js?v=20260501i"></script>
+    <script defer src="app.js?v=20260501i"></script>
   </body>
 </html>
