@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DBM coil code decoder</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main>
+      <h1>DBM coil code decoder</h1>
+      <p class="sub">
+        Paste a hyphenated coil string from the submittal. The app maps each segment to field names and a short
+        description you can forward to a coil vendor. Extend lookups in
+        <code>coilParser.js</code> as you confirm codes with DBM.
+      </p>
+
+      <section class="panel" aria-labelledby="decode-heading">
+        <h2 id="decode-heading" class="visually-hidden">Decode</h2>
+        <label class="display" for="coil-input">Coil code</label>
+        <div class="input-row">
+          <input
+            id="coil-input"
+            type="text"
+            spellcheck="false"
+            autocomplete="off"
+            placeholder="e.g. GXK-41-W-4-10-102-1830-3500-3.0-CU-AJ1-1-tt-3"
+            aria-describedby="error-msg"
+          />
+          <button type="button" class="primary" id="btn-decode">Decode</button>
+          <button type="button" class="ghost" id="btn-clear">Clear</button>
+        </div>
+        <p id="error-msg" class="sub" role="alert" style="margin: 0.75rem 0 0; color: var(--danger)"></p>
+        <div class="display" style="margin-top: 1rem">Segments</div>
+        <div id="segments" class="segments" aria-live="polite"></div>
+      </section>
+
+      <section class="panel" aria-labelledby="table-heading">
+        <h2 id="table-heading" style="font-size: 1.05rem; margin: 0 0 0.85rem">Field breakdown</h2>
+        <table class="decode">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Raw</th>
+              <th>Meaning</th>
+            </tr>
+          </thead>
+          <tbody id="decode-body"></tbody>
+        </table>
+      </section>
+
+      <section class="panel" aria-labelledby="summary-heading">
+        <h2 id="summary-heading" style="font-size: 1.05rem; margin: 0 0 0.65rem">Supplier / RFQ summary</h2>
+        <label class="display" for="supplier-summary">Copy-paste block</label>
+        <textarea id="supplier-summary" class="textarea-block" readonly></textarea>
+        <div class="actions">
+          <button type="button" class="primary" id="btn-copy-summary">Copy summary</button>
+        </div>
+      </section>
+
+      <footer>
+        Open <code>index.html</code> directly in Chrome or Edge (<code>file://</code> is supported).
+      </footer>
+    </main>
+    <div id="toast" class="toast" role="status"></div>
+
+    <style>
+      .visually-hidden {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+      code {
+        font-family: ui-monospace, monospace;
+        font-size: 0.88em;
+        color: #7dd3fc;
+      }
+    </style>
+
+    <script src="coilParser.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
