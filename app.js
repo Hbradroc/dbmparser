@@ -249,6 +249,13 @@ function preprocessCoilOcr(raw) {
   s = s.replace(/\bGX\s*[.,]?\s*HK\b/gi, "GXHK");
   s = s.replace(/\bGX\s*[.,]?\s*K\b/gi, "GXK");
   s = s.replace(/\bGX\s*[.,]?\s*H\b/gi, "GXH");
+  /** “Al…” (fin aluminum on submittals) often OCRs as “Ai…” (roman I vs sans-serif l). Fix before uppercase. */
+  s = s.replace(/\bAi(\d{1,3})\b/gi, "Al$1");
+  s = s.replace(/\bAi\s+(\d{1,3})\b/gi, "Al $1");
+  s = s.replace(/\bAl\s+(\d{1,3})\b/gi, "Al$1");
+  /** After Cu tubes, hyphenated AI## on these GEO-style sheets is almost always AL## fin naming. */
+  s = s.replace(/\bCU-AI(\d{1,3})\b/gi, "CU-AL$1");
+  s = s.replace(/\bCU-AI\s+(\d{1,3})\b/gi, "CU-AL$1");
   s = s.replace(/\bAI\s+11\b/gi, "AI11");
   s = s.replace(/\bAJ\s*1\b/gi, "AJ1");
   s = s.replace(/\bA[Ll1Ii|]\s*11\b|\bALI\s*1\b/gi, "AL11");
