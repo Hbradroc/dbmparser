@@ -10,9 +10,10 @@
     <main>
       <h1>DBM coil code decoder</h1>
       <p class="sub">
-        Paste a hyphenated coil string from the submittal.         Drawing PDFs/XLSX are hosted in-repo under <code>drawings/</code> (indexed list + links). GEO.COIL manual/DLL
-        hints as before. Extend <code>coilParser.js</code> for custom
-        family codes like <code>GXK</code>.
+        Paste a hyphenated coil string from the submittal. Drawing logic: <strong>GXH</strong> → heating /
+        Heater folder, <strong>GXK</strong> → cooling (<strong>W</strong> → Cooler, <strong>D…</strong> DX → Evapurator),
+        <strong>GXHK</strong> → changeover + Big Sizes pack. Field <strong>4</strong> tube digit <strong>3|4|5</strong>
+        selects <strong>P25|P3012|P40</strong> folders. Hosted under <code>drawings/</code>.
       </p>
 
       <section class="panel" aria-labelledby="decode-heading">
@@ -47,6 +48,15 @@
           </thead>
           <tbody id="decode-body"></tbody>
         </table>
+      </section>
+
+      <section class="panel pdf-preview-panel" aria-labelledby="preview-heading">
+        <h2 id="preview-heading" style="font-size: 1.05rem; margin: 0 0 0.65rem">Primary drawing preview</h2>
+        <p id="drawing-preview-meta" class="sub" style="margin: 0 0 0.65rem"></p>
+        <div id="drawing-preview-slot" class="pdf-preview-slot" hidden>
+          <iframe id="drawing-pdf-frame" class="pdf-frame" title="Primary coil drawing PDF"></iframe>
+        </div>
+        <div id="drawing-preview-none" class="sub muted-slot">Decode a coil code to load a PDF from the matched folder.</div>
       </section>
 
       <section class="panel" aria-labelledby="drawings-heading">
@@ -102,8 +112,8 @@
       }
     </style>
 
-    <script defer src="coilParser.js?v=20260501f"></script>
-    <script defer src="coilsDrawingsIndex.js?v=20260501f"></script>
-    <script defer src="app.js?v=20260501f"></script>
+    <script defer src="coilParser.js?v=20260501h"></script>
+    <script defer src="coilsDrawingsIndex.js?v=20260501h"></script>
+    <script defer src="app.js?v=20260501h"></script>
   </body>
 </html>

@@ -33,11 +33,13 @@ const LOOKUPS = {
     COH: "Heating coil (COH)",
     COK: "Cooling coil (COK)",
     GXK:
-      "Coil family code GXK (drawing/submittal nomenclature — not listed in GEO.COIL DLL Table 6 P60/P3012/P40/P25)",
+      "Cooling coil family (Geniox GXK) — use field 3 (medium): W = chilled water → Cooler drawings; Dxx = DX/refrigerant context → Evapurator drawings",
     GXH:
-      "Coil family code GXH (drawing/submittal nomenclature — confirm alongside DBM order description)",
+      "Heating coil family (Geniox GXH) — drawing set: Heater folder for the tube geometry from field 4",
+    GXHK:
+      "Changeover coil (Geniox GXHK) — use Big Sizes changeover pack; tube geometry from field 4 still selects P25/P3012/P40 where applicable",
     GXC:
-      "Coil family code GXC (drawing/submittal nomenclature — confirm alongside DBM order description)",
+      "Coil family GXC (often cooling-side — confirm water vs DX using field 3)",
     P60: `${DLL_COIL_TYPE_TABLE6["1"]}`,
     P3012: `${DLL_COIL_TYPE_TABLE6["2"]}`,
     P40: `${DLL_COIL_TYPE_TABLE6["94"]}`,
@@ -51,9 +53,9 @@ const LOOKUPS = {
     R: "Refrigerant circuit context (verify)",
   },
   tubeCode: {
-    "3": 'Tube OD 3/8"',
-    "4": 'Tube OD 1/2"',
-    "5": 'Tube OD 5/8"',
+    "3": 'Tube OD 3/8" — drawing geometry folder P25 (match hosted P25/* pack)',
+    "4": 'Tube OD 1/2" — drawing geometry folder P3012 (e.g. Calc98 "1/2\" (P3012)")',
+    "5": 'Tube OD 5/8" — drawing geometry folder P40',
   },
   headerMaterial: {
     CU: "Copper headers (GEO.COIL DLL Table 10 maps header material Copper = numeric code 1 in cell 9)",
@@ -202,6 +204,20 @@ function explainFinMaterial(raw) {
 function meaningForField(field, raw, standardTokens = []) {
   if (raw == null || raw === "") return { text: "—", certain: true };
   const { key, lookup } = field;
+
+  if (key === "medium" && /^D\d+/i.test(String(raw))) {
+    return {
+      text: `DX / refrigerant-side medium code "${raw}" (Calc98 coil string) — for GXK, use Evapurator drawing folder with geometry from field 4.`,
+      certain: false,
+    };
+  }
+  if (key === "medium" && String(raw).toUpperCase() === "W") {
+    return {
+      text: 'Water / chilled water (W) — for GXK, use Cooler drawing folder with geometry from field 4 (e.g. CW cooling coil).',
+      certain: true,
+    };
+  }
+
   if (lookup && LOOKUPS[lookup]) {
     const hit = lookupCategory(lookup, raw);
     if (hit) return { text: hit, certain: true };
@@ -290,8 +306,15 @@ function getDrawingsCatalog() {
   return Array.isArray(window.DBMM_COILS_DRAWINGS_INDEX) ? window.DBMM_COILS_DRAWINGS_INDEX : [];
 }
 
+/** Tube diameter code (field 4, 1-based position) → drawings root folder name. */
+const TUBE_CODE_TO_DRAWING_GEOM = {
+  "3": "P25",
+  "4": "P3012",
+  "5": "P40",
+};
+
 /**
- * First token is P25 / P3012 / P40 → maps to Coils drawings subfolders.
+ * Coils drawings folder: explicit P25/P3012/P40 prefix, else Geniox tube code digit in field 4.
  */
 function inferDrawingGeometry(tokens) {
   const t0 = String(tokens[0] || "")
@@ -300,29 +323,75 @@ function inferDrawingGeometry(tokens) {
   if (/^P25$/.test(t0)) return "P25";
   if (/^P3012$/.test(t0)) return "P3012";
   if (/^P40$/.test(t0)) return "P40";
-  return null;
+
+  const tubeTok = String(tokens[3] != null ? tokens[3] : "").trim();
+  return TUBE_CODE_TO_DRAWING_GEOM[tubeTok] || null;
+}
+
+function isGxkDxMedium(mediumRaw) {
+  const m = String(mediumRaw || "").toUpperCase().trim();
+  if (!m || m === "*") return false;
+  if (m === "W" || m.startsWith("CW") || m === "CHW" || m === "CG") return false;
+  if (/^D\d/.test(m)) return true;
+  if (/(^|-)DX($|-)/.test(m) || /^R\d/.test(m)) return true;
+  return false;
 }
 
 /**
- * Map coil family + medium to drawing application folders (matches folder names under P25/P3012/P40).
+ * GXH heating, GXK cooling (water vs DX by field 3), GXHK changeover → folder names under P25/P3012/P40 and Big Sizes.
  */
 function inferDrawingApplications(tokens) {
-  const coil = String(tokens[0] || "").toUpperCase();
-  const medium = String(tokens[2] || "").toUpperCase();
+  const coil = String(tokens[0] || "").toUpperCase().trim();
+  const mediumRaw = tokens[2] != null ? tokens[2] : "";
+  const medium = String(mediumRaw || "").toUpperCase().trim();
 
-  if (coil === "COH") return { apps: ["Heater"], note: null };
+  if (coil === "COH" || coil === "GXH") {
+    return { apps: ["Heater"], note: null };
+  }
   if (coil === "COK") return { apps: ["Cooler"], note: null };
+  if (coil === "GXHK") {
+    return {
+      apps: ["Changeover"],
+      note: 'GXHK changeover — primary standard pack lives under drawings "Big Sizes (35-44)" (changeover brochure); geometry folders P25/P3012/P40 use field 4 for related size packs.',
+    };
+  }
+
+  if (coil === "GXK") {
+    if (medium === "W" || medium.startsWith("CW")) {
+      return {
+        apps: ["Cooler"],
+        note: "GXK + W (water / chilled water) → AHU cooling coil set (Cooler folder), e.g. CW cooling coil.",
+      };
+    }
+    if (isGxkDxMedium(mediumRaw)) {
+      return {
+        apps: ["Evapurator"],
+        note: "GXK + DX / refrigerant-style medium (e.g. D35) → evaporator DX set (Evapurator folder — Calc98 spells 'Evapurator').",
+      };
+    }
+    return {
+      apps: ["Cooler", "Evapurator"],
+      note: 'GXK + unclear medium — showing both Cooler (water) and Evapurator (DX). Field 3: use W for water, patterns like D35 for DX.',
+    };
+  }
+
+  if (coil === "GXC") {
+    if (medium === "W" || medium.startsWith("CW")) return { apps: ["Cooler"], note: null };
+    if (isGxkDxMedium(mediumRaw)) return { apps: ["Evapurator"], note: null };
+    return { apps: ["Cooler"], note: "GXC: defaulted to Cooler set — verify field 3 (water vs DX)." };
+  }
+
   if (/COND/.test(coil)) return { apps: ["Condenser"], note: null };
   if (/EVAP|^DX|^ED/.test(coil)) return { apps: ["Evapurator"], note: null };
 
   if (medium === "S") {
-    return { apps: ["Heater"], note: "Fluid code S: reference steam heater drawing sets (verify execution vs submittal)." };
+    return { apps: ["Heater"], note: "Fluid code S: steam heater drawings (verify vs submittal)." };
   }
 
   const all = ["Heater", "Cooler", "Evapurator", "Condenser", "Changeover"];
   return {
     apps: all,
-    note: `Coil type "${tokens[0] || ""}" is not mapped to a single drawing family — listing all standard drawing packs for P25/P3012/P40 + Big Sizes matches. Narrow after you confirm cooler/heater/DX/condenser.`,
+    note: `Coil type "${tokens[0] || ""}" not mapped tightly — listing all packs. Prefer GXH (heat), GXK (cool), GXHK (changeover) with field 4 = P25/P3012/P40 tube digit.`,
   };
 }
 
@@ -332,12 +401,24 @@ function bigSizeMatchesEntry(entry, geometryKey, apps) {
     if (a === "Changeover") return n.includes("CHANGEOVER");
     if (a === "Cooler") return n.includes("COOLING");
     if (a === "Evapurator") return n.includes("EVAPORATING");
+    if (a === "Condenser") return n.includes("CONDENS") && !n.includes("COOLING");
     if (a === "Heater") {
       if (!geometryKey) return n.includes("HEATING");
-      return n.includes("HEATING") && n.endsWith(`-${geometryKey}.PDF`);
+      return n.includes("HEATING") && (n.endsWith(`-${geometryKey}.PDF`) || n.endsWith(`-${geometryKey}.pdf`));
     }
     return false;
   });
+}
+
+/** First representative PDF for on-page preview (skip Reference packs and XLSX). */
+function pickPrimaryDrawingPdf(files) {
+  if (!files || !files.length) return null;
+  const candidates = files.filter((f) => String(f.ext || "").toLowerCase() === ".pdf" && f.geometry !== "Reference");
+  if (!candidates.length) return null;
+  const page1 = candidates.find((f) => /(^|_)PAGE_1\.PDF$/i.test(String(f.name || "")));
+  if (page1) return page1;
+  candidates.sort((a, b) => String(a.relPath || "").localeCompare(String(b.relPath || "")));
+  return candidates[0];
 }
 
 function selectDrawingReferences(tokens) {
@@ -354,12 +435,13 @@ function selectDrawingReferences(tokens) {
   const geometryKey = inferDrawingGeometry(tokens);
   const { apps, note: appNote } = inferDrawingApplications(tokens);
   const geomsToScan = geometryKey ? [geometryKey] : DRAWING_STANDARD_GEOMS;
+  const appsForPacks = apps.filter((a) => a !== "Changeover");
 
   const picked = [];
   for (const g of geomsToScan) {
     for (const entry of catalog) {
       if (entry.geometry !== g) continue;
-      if (!apps.includes(entry.application)) continue;
+      if (!appsForPacks.includes(entry.application)) continue;
       picked.push(entry);
     }
   }
@@ -397,11 +479,21 @@ function selectDrawingReferences(tokens) {
     return String(a.name).localeCompare(String(b.name));
   });
 
+  const tubeHint = geometryKey ? geometryKey : "field 4 not 3|4|5 — pick geometry manually";
+  const selectionSummary = `Drawings narrowed by coil prefix (${String(tokens[0] || "").toUpperCase()}), medium (field 3), and tube / folder geometry ${tubeHint}.`;
+  const primary = pickPrimaryDrawingPdf(files);
+  const primaryPdfRelPath = primary ? primary.relPath : null;
+  const primaryPdfUrl = primaryPdfRelPath ? bundledDrawingUrl(primaryPdfRelPath) : "";
+
   return {
     geometry: geometryKey,
     applications: apps,
     files,
     note: appNote,
+    selectionSummary,
+    primaryPdfRelPath,
+    primaryPdfUrl,
+    primaryPdfName: primary ? primary.name : null,
   };
 }
 
@@ -441,9 +533,11 @@ function appendDrawingRefsToSummary(lines, pack) {
     return;
   }
   lines.push(
-    `Filtered geometry: ${pack.geometry || "P25 + P3012 + P40 (all)"} | Applications: ${pack.applications.join(", ")}`,
+    `Folders: geometry ${pack.geometry || "? (field 4 → P25|P3012|P40)"} | drawing sets: ${pack.applications.join(", ")}`,
   );
+  if (pack.selectionSummary) lines.push(pack.selectionSummary);
   if (pack.note) lines.push(`Note: ${pack.note}`);
+  if (pack.primaryPdfRelPath) lines.push(`Primary PDF for preview/list: ${pack.primaryPdfRelPath}`);
   lines.push(
     `Files (${pack.files.length}) — URLs under "./drawings/" (includes Reference/* such as tube thickness tables).`,
   );

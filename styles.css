@@ -324,6 +324,31 @@ footer {
   color: var(--muted);
 }
 
+.pdf-preview-slot {
+  width: 100%;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: #0d1117;
+  min-height: 200px;
+}
+
+.pdf-frame {
+  display: block;
+  width: 100%;
+  height: min(72vh, 820px);
+  border: none;
+  background: var(--surface-2);
+}
+
+.pdf-preview-panel .muted-slot {
+  margin: 0;
+  padding: 1rem;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+}
+
 @media print {
   body {
     background: #fff;
@@ -334,7 +359,8 @@ footer {
     border: 1px solid #ccc;
   }
   button,
-  .segments {
+  .segments,
+  .pdf-preview-panel {
     display: none;
   }
 }

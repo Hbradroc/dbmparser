@@ -15,6 +15,10 @@ const toastEl = $("#toast");
 const drawingsRootEl = $("#drawings-root");
 const drawingsMetaEl = $("#drawings-meta");
 const drawingsListEl = $("#drawings-list");
+const drawingPreviewMetaEl = $("#drawing-preview-meta");
+const drawingPreviewSlotEl = $("#drawing-preview-slot");
+const drawingPreviewNoneEl = $("#drawing-preview-none");
+const drawingPdfFrameEl = $("#drawing-pdf-frame");
 
 const LS_DRAWINGS_ROOT = "dbmCoilsDrawingsRoot";
 
@@ -72,6 +76,40 @@ function escapeHtml(s) {
     .replace(/"/g, "&quot;");
 }
 
+function renderPdfPreview(pack) {
+  if (!drawingPdfFrameEl || !drawingPreviewSlotEl || !drawingPreviewNoneEl) return;
+  const url = pack && pack.primaryPdfUrl;
+  if (!pack) {
+    drawingPdfFrameEl.removeAttribute("src");
+    drawingPreviewSlotEl.hidden = true;
+    drawingPreviewNoneEl.hidden = false;
+    if (drawingPreviewMetaEl) drawingPreviewMetaEl.textContent = "";
+    return;
+  }
+  if (drawingPreviewMetaEl) {
+    const bits = [];
+    if (pack.selectionSummary) bits.push(pack.selectionSummary);
+    if (pack.primaryPdfName) bits.push(`Preview: ${pack.primaryPdfName}`);
+    drawingPreviewMetaEl.textContent = bits.join(" ");
+  }
+  if (url) {
+    drawingPdfFrameEl.src = url;
+    drawingPreviewSlotEl.hidden = false;
+    drawingPreviewNoneEl.hidden = true;
+  } else {
+    drawingPdfFrameEl.removeAttribute("src");
+    drawingPreviewSlotEl.hidden = true;
+    drawingPreviewNoneEl.hidden = false;
+    if (drawingPreviewMetaEl) {
+      if (!pack || !pack.files || !pack.files.length) {
+        drawingPreviewMetaEl.textContent = "";
+      } else if (pack.note) {
+        drawingPreviewMetaEl.textContent = pack.selectionSummary ? `${pack.selectionSummary} ${pack.note}` : pack.note;
+      }
+    }
+  }
+}
+
 function renderDrawingRefs(pack, rootHint) {
   drawingsListEl.innerHTML = "";
   const urlBuilder = parser && typeof parser.bundledDrawingUrl === "function" ? parser.bundledDrawingUrl : null;
@@ -80,17 +118,18 @@ function renderDrawingRefs(pack, rootHint) {
       pack && pack.note
         ? pack.note
         : "No drawings matched. Paste a coil code and decode.";
+    renderPdfPreview(null);
     return;
   }
-  const geoLine = pack.geometry || "all standard (P25 + P3012 + P40)";
+  const geoLine = pack.geometry || "field 4 not 3|4|5 (showing all geometries)";
   const appsLine = (pack.applications || []).join(", ");
   const baseHint =
     parser && typeof parser.bundledDrawingsBaseUrl === "function"
       ? String(parser.bundledDrawingsBaseUrl() || "").replace(/\/?$/, "/")
       : "";
-  drawingsMetaEl.textContent = `Same-site files under ./drawings/ ${baseHint ? "(" + baseHint + ")" : ""} • Geometry filter: ${geoLine} • Drawing sets: ${appsLine}${
-    pack.note ? " — " + pack.note : ""
-  }`;
+  drawingsMetaEl.textContent = `${
+    pack.selectionSummary ? pack.selectionSummary + " • " : ""
+  }./drawings/ ${baseHint ? "(" + baseHint + ")" : ""} • Folder: ${geoLine} • Sets: ${appsLine}${pack.note ? " — " + pack.note : ""}`;
   const root = (rootHint != null ? rootHint : drawingsRootEl && drawingsRootEl.value) || "";
 
   const ul = document.createElement("ul");
@@ -124,6 +163,7 @@ function renderDrawingRefs(pack, rootHint) {
     ul.appendChild(li);
   }
   drawingsListEl.appendChild(ul);
+  renderPdfPreview(pack);
 }
 
 function decode() {
@@ -170,6 +210,7 @@ btnClear.addEventListener("click", () => {
   tableBody.innerHTML = "";
   summaryEl.value = "";
   renderDrawingRefs(null, drawingsRootEl.value);
+  renderPdfPreview(null);
   inputEl.focus();
 });
 
