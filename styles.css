@@ -302,6 +302,17 @@ table.decode .meaning.meaning-missingcol {
   color: var(--muted);
 }
 
+table.decode tbody tr.row-geniox-highlight th,
+table.decode tbody tr.row-geniox-highlight td {
+  background: rgba(56, 189, 248, 0.1);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+table.decode tbody tr.row-geniox-highlight .raw {
+  font-weight: 600;
+  color: var(--accent);
+}
+
 .badge {
   display: inline-block;
   font-size: 0.72rem;

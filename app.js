@@ -273,6 +273,7 @@ function renderTable(rows) {
     ].join(" ");
     tdMeaning.textContent = `${r.label} — ${r.meaning}`;
     tr.append(th, tdRaw, tdMeaning);
+    if (r.key === "size") tr.classList.add("row-geniox-highlight");
     tableBody.appendChild(tr);
   }
 }
@@ -529,6 +530,14 @@ async function buildCoilReportPdfBytes() {
     },
     head: [["#", "Field", "Raw", "Meaning"]],
     body: res.rows.map((r) => [String(r.position), r.label, r.raw ? String(r.raw) : "—", String(r.meaning || "")]),
+    didParseCell(data) {
+      if (data.section !== "body" || data.row == null) return;
+      const srcRow = res.rows[data.row.index];
+      if (!srcRow || srcRow.key !== "size") return;
+      data.cell.styles.fillColor = [224, 242, 254];
+      data.cell.styles.textColor = PDF_THEME.ink;
+      if (data.column.index === 2) data.cell.styles.fontStyle = "bold";
+    },
   });
   y = doc.lastAutoTable.finalY + 28;
 

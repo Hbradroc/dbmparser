@@ -213,14 +213,37 @@ function meaningForField(field, raw, standardTokens = []) {
   const { key, lookup } = field;
 
   if (key === "medium" && /^D\d+/i.test(String(raw))) {
+    const coil = String(standardTokens[0] || "").toUpperCase();
+    if (coil === "GXK" || coil === "COK") {
+      return {
+        text: `DX / refrigerant medium code "${raw}" — GXK draws from Evapurator folder; geometry comes from tube field (digit 4 in code).`,
+        certain: false,
+      };
+    }
     return {
-      text: `DX / refrigerant medium code "${raw}" — GXK draws from Evapurator folder; geometry comes from tube field (digit 4 in code).`,
+      text: `DX / refrigerant-style medium code "${raw}" — most often used with GXK evaporator naming; confirm against submittal if coil type is not GXK.`,
       certain: false,
     };
   }
   if (key === "medium" && String(raw).toUpperCase() === "W") {
+    const coil = String(standardTokens[0] || "").toUpperCase();
+    if (coil === "GXH" || coil === "COH") {
+      return {
+        text:
+          "Water/heating-fluid medium (W) — GXH heater coil: use Heater drawing folder set with geometry from field 4 (not the GXK cooler/evap wording).",
+        certain: true,
+      };
+    }
+    if (coil === "GXHK") {
+      return {
+        text:
+          'Water medium (W) — GXHK changeover: follow bundled changeover / Big Sizes packages; tube geometry still from field 4 → P25/P3012/P40.',
+        certain: false,
+      };
+    }
     return {
-      text: 'Water / chilled water (W) — for GXK, use Cooler drawing folder with geometry from field 4 (e.g. CW cooling coil).',
+      text:
+        "Water / chilled water (W) — GXK cooling coil: Cooler drawing folder with geometry from field 4 (e.g. chilled-water cooling coil).",
       certain: true,
     };
   }
