@@ -78,6 +78,7 @@ const LOOKUPS = {
     ALPR: "Pre-painted aluminum fins (DLL Table 7: ALPR)",
     CUSN: "CuSn fins (DLL Table 7)",
     AJ1: "Fin stock / finish code AJ1 (aluminum-family in DBM tables: AL, ALPR, AlMg2.5, etc.)",
+    AL11: "Fin stock code AL11 (aluminum fin series — GEO.COIL submittals; same material family as AL / AJ1 in Table 7 legend).",
     CU: "Copper fins (DLL Table 7: CU)",
     SST: "Stainless fins",
   },
@@ -151,6 +152,8 @@ function normalizeInput(raw) {
   let s = String(raw).trim();
   s = s.replace(/\s+/g, " ");
   s = s.replace(/\s*-\s*/g, "-");
+  /** Slash lost in OCR/submittals: …-H-1-112− should read 1½ in (also fixes hyphen split before token repair). */
+  s = s.replace(/-1-112(?=-|$)/gi, '-1 1/2"');
   return s;
 }
 
@@ -171,6 +174,38 @@ function expandSplitCodes(tokens) {
   return out;
 }
 
+/** Mis-OCR merges "1 1/2" into hyphen runs like …-H-1-112 or drops the slash (− …-112). */
+function repairConnectionFractionSplits(tokens) {
+  const ixHand = STANDARD_FIELDS.findIndex((f) => f.key === "handing");
+  const ixConn = STANDARD_FIELDS.findIndex((f) => f.key === "connectionSize");
+  if (ixHand < 0 || ixConn < 0 || tokens.length <= ixConn) return tokens;
+
+  const out = tokens.slice();
+
+  /** …- handing [ixHand] − connection − extra after standard count */
+  if (!/^(H|LH|RH|L|R|2)$/i.test(String(out[ixHand] || ""))) return out;
+
+  const a = String(out[ixConn] ?? "");
+  const b = String(out[ixConn + 1] ?? "");
+
+  /** …- H − 1 − 112 − */
+  if (a === "1" && /^112$/i.test(b)) {
+    out.splice(ixConn, 2, `1 1/2"`);
+    return out;
+  }
+  /** …- H − 112 − (whole chunk lost the leading "1 ") */
+  if (/^112$/i.test(a)) {
+    out.splice(ixConn, 1, `1 1/2"`);
+    return out;
+  }
+  /** Rare: …−1−1−2 */
+  if (a === "1" && b === "1" && String(out[ixConn + 2] ?? "") === "2") {
+    out.splice(ixConn, 3, `1 1/2"`);
+    return out;
+  }
+  return out;
+}
+
 /**
  * Split on hyphens; keep segments. Header sizes like "1 1/4" stay as one segment.
  */
@@ -179,7 +214,7 @@ function tokenize(code) {
     .split("-")
     .map((t) => t.trim())
     .filter(Boolean);
-  return expandSplitCodes(parts);
+  return repairConnectionFractionSplits(expandSplitCodes(parts));
 }
 
 function lookupCategory(category, code) {
@@ -200,10 +235,23 @@ function explainManifoldTable13(raw) {
 }
 
 function explainFinMaterial(raw) {
-  const direct = lookupCategory("finMaterial", raw);
+  const t = String(raw || "").trim();
+  const upper = t.toUpperCase();
+  /** Common submittal: Al… (aluminum) mis-keyed/OCR as AI… (capital I vs L). Normalize display. */
+  if (/^AI\d+$/i.test(t)) {
+    const asAl = upper.replace(/^AI/, "AL");
+    const alt = lookupCategory("finMaterial", asAl);
+    if (alt) return `${alt} (code read as "${raw}", treated as aluminum series ${asAl}).`;
+    return `Fin material aluminum stock "${asAl}" (from "${raw}" — submittals often render “Al” like “Ai”).`;
+  }
+  const direct = lookupCategory("finMaterial", upper);
   if (direct) return direct;
-  if (/^A[J-Z]?\d*$/i.test(raw)) {
-    return `Fin material / stock code "${raw}" (typically aluminum-series from product legend)`;
+  if (/^[A-Z]{2,3}\d+$/i.test(t) && /^AL|^AJ/i.test(upper)) {
+    const altHint = /^AL\d+$/i.test(t) ? "aluminum-series" : "fin-stock";
+    return `Fin material code "${upper}" (${altHint} naming from GEO.COIL / product legends).`;
+  }
+  if (/^A[J-Z]\d*$/i.test(t)) {
+    return `Fin material / stock code "${upper}" (typically aluminum-series from product legend)`;
   }
   return null;
 }
@@ -262,11 +310,12 @@ function meaningForField(field, raw, standardTokens = []) {
   }
   if (key === "size" && /^\d+$/.test(raw)) {
     const n = parseInt(raw, 10);
+    /** ASCII-only inequalities so PDF/fonts don’t mangle Unicode ≤ / ≥ into garbage (e.g. “GST”). */
     const bigHint =
       Number.isFinite(n) && n >= BIG_SIZES_GENIOX_MIN
-        ? ` Big-cabinet line (≥${BIG_SIZES_GENIOX_MIN}): also use "Big Sizes (35–44)" coil brochures alongside P25/P3012/P40.`
+        ? ` Big-cabinet line (>= ${BIG_SIZES_GENIOX_MIN}): also use "Big Sizes (35–44)" coil brochures alongside P25/P3012/P40.`
         : Number.isFinite(n)
-          ? ` Standard line (≤${BIG_SIZES_GENIOX_MIN - 1}): geometry folders P25/P3012/P40 only (unless GXHK).`
+          ? ` Standard line (max size ${BIG_SIZES_GENIOX_MIN - 1}): geometry folders P25/P3012/P40 only (unless GXHK).`
           : "";
     return {
       text: `Geniox size ${raw}.${bigHint}`,

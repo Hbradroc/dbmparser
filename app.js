@@ -714,47 +714,6 @@ function stampSummaryPageFooters(doc, marg) {
   }
 }
 
-function screenshotFormatForPdf(dataUrl) {
-  const u = String(dataUrl || "").toLowerCase();
-  if (u.includes("image/jpeg") || u.includes("image/jpg")) return "JPEG";
-  return "PNG";
-}
-
-function addScreenshotToPdf(doc, dataUrl, marginLeft, startY) {
-  return new Promise((resolve) => {
-    if (!dataUrl || !/^data:image\//i.test(dataUrl)) {
-      resolve(startY);
-      return;
-    }
-    const { pw, ph } = pdfPageGeom(doc);
-    const im = new Image();
-    im.onload = () => {
-      try {
-        const nw = im.naturalWidth || im.width || 1;
-        const nh = im.naturalHeight || im.height || 1;
-        const maxW = pw - marginLeft * 2 - 24;
-        const ew = Math.min(maxW, (nw * 72) / 96);
-        const eh = Math.max((nh * ew) / nw, 1);
-        let y = startY;
-        if (y + eh + 50 > ph - 52) {
-          doc.addPage();
-          y = 56;
-        }
-        doc.setFillColor(...PDF_THEME.surface);
-        doc.setDrawColor(...PDF_THEME.border);
-        doc.roundedRect(marginLeft - 2, y - 6, ew + 8, eh + 8, 2, 2, "FD");
-        doc.addImage(dataUrl, screenshotFormatForPdf(dataUrl), marginLeft + 2, y, ew, eh, undefined, "FAST");
-        resolve(y + eh + 22);
-      } catch (_) {
-        resolve(startY);
-      }
-    };
-    im.onerror = () => resolve(startY);
-    im.crossOrigin = "anonymous";
-    im.src = dataUrl;
-  });
-}
-
 async function mergeReportWithDrawingAppendix(reportArrayBuffer, drawingPdfUrl) {
   const PDFDocument = PDFLib.PDFDocument;
   const merged = await PDFDocument.create();
@@ -822,17 +781,6 @@ async function buildCoilReportPdfBytes() {
   doc.text(coilLines, marg + pad, y + pad + 11);
   doc.setFont("helvetica", "normal");
   y += boxH + 22;
-
-  if (reportSnapshot.ocrDataUrl) {
-    doc.setFont("helvetica", "italic");
-    doc.setFontSize(9);
-    doc.setTextColor(...PDF_THEME.muted);
-    doc.text("Source image (OCR) — cropped submittal or selection screen.", marg, y);
-    y += 16;
-    doc.setTextColor(...PDF_THEME.bodyText);
-    doc.setFont("helvetica", "normal");
-    y = await addScreenshotToPdf(doc, reportSnapshot.ocrDataUrl, marg, y);
-  }
 
   y += 8;
   y = drawPdfSectionHeading(doc, marg, y, "Field breakdown");
