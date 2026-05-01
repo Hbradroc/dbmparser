@@ -37,6 +37,30 @@ const parseCoilCode = parser && typeof parser.parseCoilCode === "function" ? par
 const COIL_OCR_PREFIXES = ["GXHK", "GXK", "GXH", "COH", "COK"];
 const COIL_HEAD_RE = new RegExp(`\\b(?:${COIL_OCR_PREFIXES.join("|")})\\b`, "g");
 
+/** Standard long form = coil prefix + (STANDARD_FIELDS.length − 1) hyphen segments — do not eat the next table row in OCR. */
+const OCR_MAX_SEGMENTS_AFTER_PREFIX =
+  parser && Array.isArray(parser.STANDARD_FIELDS) && parser.STANDARD_FIELDS.length > 1
+    ? parser.STANDARD_FIELDS.length - 1
+    : 12;
+
+/** Labels from the row below / beside the coil line that OCR sometimes merges; never treat as coil tokens. */
+const OCR_COIL_SEGMENT_STOP = new Set([
+  "WATER",
+  "TRAP",
+  "PCS",
+  "DRIP",
+  "TRAY",
+  "DRIPTRAY",
+  "FPI",
+  "THICKNESS",
+  "SPACING",
+  "STAINLESS",
+  "ALUMINUM",
+  "COPPER",
+  "DIAMETER",
+  "SERVICE",
+]);
+
 function preprocessCoilOcr(raw) {
   let s = String(raw || "")
     .replace(/\r?\n|[\x0b\x0c\u0085\u2028\u2029]/g, " ")
@@ -66,16 +90,20 @@ function skipWsHyphen(s, i) {
   return j;
 }
 
-function consumeHyphenSegments(s, idx) {
+function consumeHyphenSegments(s, idx, maxTokens) {
+  const cap = typeof maxTokens === "number" && maxTokens > 0 ? maxTokens : OCR_MAX_SEGMENTS_AFTER_PREFIX;
   const tokens = [];
   let i = idx;
   for (let guard = 0; guard < 28; guard++) {
+    if (tokens.length >= cap) break;
     const j = skipWsHyphen(s, i);
     i = j;
     if (i >= s.length || !/[A-Z0-9.]/.test(s[i])) break;
     const rest = s.slice(i);
     const hm = /^(\d+\.\d+|[A-Z]{1,8}\d*|\d+)/.exec(rest);
     if (!hm) break;
+    const piece = hm[1].toUpperCase();
+    if (OCR_COIL_SEGMENT_STOP.has(piece)) break;
     tokens.push(hm[1]);
     i += hm[0].length;
   }
@@ -92,10 +120,10 @@ function extractCoilCodeFromOcrText(rawText) {
   while ((m = COIL_HEAD_RE.exec(lu)) !== null) {
     const pfx = m[0];
     const afterHead = m.index + m[0].length;
-    const { tokens } = consumeHyphenSegments(lu, afterHead);
+    const { tokens } = consumeHyphenSegments(lu, afterHead, OCR_MAX_SEGMENTS_AFTER_PREFIX);
     if (tokens.length < 10) continue;
     const candidate = `${pfx}-${tokens.join("-")}`;
-    let rank = tokens.length * 10;
+    let rank = tokens.length * 10 + (tokens.length >= OCR_MAX_SEGMENTS_AFTER_PREFIX ? 50 : 0);
     if (parseCoilCode) {
       const r = parseCoilCode(candidate);
       if (r.ok) rank += 800;
