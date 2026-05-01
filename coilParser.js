@@ -81,6 +81,31 @@ const LOOKUPS = {
   },
 };
 
+/**
+ * Tube OD -> geometry/thickness mapping used by this decoder.
+ * Thickness values reference GEO.COIL DLL documentation tables:
+ * - P3012 section: 0.35, 0.40, 0.60 mm
+ * - P40 section: 0.40, 0.60, 0.75, 1.00, 1.50 mm
+ * - P60 section: 0.40, 0.60, 0.75, 1.00, 1.50 mm
+ */
+const TUBE_CODE_SPECS = {
+  "3": {
+    od: 'Tube OD 3/8"',
+    geometry: "P3012",
+    thicknessMm: "0.35 / 0.40 / 0.60",
+  },
+  "4": {
+    od: 'Tube OD 1/2"',
+    geometry: "P40",
+    thicknessMm: "0.40 / 0.60 / 0.75 / 1.00 / 1.50",
+  },
+  "5": {
+    od: 'Tube OD 5/8"',
+    geometry: "P60",
+    thicknessMm: "0.40 / 0.60 / 0.75 / 1.00 / 1.50",
+  },
+};
+
 /** Positions after splitting on "-" (0-based), for the long "detailed" code form */
 const STANDARD_FIELDS = [
   { key: "coilType", label: "Coil type", lookup: "coilType" },
@@ -192,6 +217,15 @@ function meaningForField(field, raw) {
         ? " — DLL input cell 15 (number of rows)"
         : " — DLL input cell 18 (number of circuits)";
     return { text: `${raw} (numeric segment)${dll}`, certain: true };
+  }
+  if (key === "tubeCode") {
+    const spec = TUBE_CODE_SPECS[String(raw).trim()] || null;
+    if (spec) {
+      return {
+        text: `${spec.od}. Geometry ${spec.geometry}. Allowed tube thickness (mm): ${spec.thicknessMm} (per GEO.COIL DLL documentation tables).`,
+        certain: true,
+      };
+    }
   }
   if ((key === "finDim1" || key === "finDim2") && /^\d+(\.\d+)?$/.test(raw)) {
     return {
