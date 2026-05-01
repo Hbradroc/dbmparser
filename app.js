@@ -73,11 +73,20 @@ function trimEmptyDimensionColumns(headers, rows) {
 /** Longest first so GXHK beats GXK and GXK beats GX at the same slice offset. */
 const COIL_PREFIX_ORDER = ["GXHK", "GXK", "GXH", "COH", "COK"];
 
-/** Standard long form = coil prefix + (STANDARD_FIELDS.length − 1) hyphen segments — do not eat the next table row in OCR. */
-const OCR_MAX_SEGMENTS_AFTER_PREFIX =
+/** Canonical segment count after coil type (= fin pitch … connection). */
+const OCR_STANDARD_TAIL_COUNT =
   parser && Array.isArray(parser.STANDARD_FIELDS) && parser.STANDARD_FIELDS.length > 1
     ? parser.STANDARD_FIELDS.length - 1
     : 12;
+
+/**
+ * Extra hyphen tokens beyond the nominal table width so mis-read fin codes like AI11→AI1+1
+ * do not steal the segment budget and drop trailing `1 1/2`.
+ */
+const OCR_TAIL_SEGMENT_SLACK = 5;
+
+/** Max tokens eaten after GXH/GXK… before hard stop — larger than STANDARD + slack. */
+const OCR_MAX_SEGMENTS_AFTER_PREFIX = OCR_STANDARD_TAIL_COUNT + OCR_TAIL_SEGMENT_SLACK;
 
 /** Accept partial OCR (missing a tail field); still prefer fuller strings via scoreOcrCandidate. */
 const OCR_MIN_SEGMENTS_AFTER_PREFIX = 8;
@@ -128,6 +137,7 @@ const OCR_COIL_SEGMENT_STOP = new Set([
   "FROST",
   "GUARD",
   "RECOMMENDED",
+  "TAP",
 ]);
 
 /** First token chunk in a hyphen or flexible-spaced coil run (supports "1 1/2", fin pitch decimals, AL11-style). */
@@ -140,6 +150,65 @@ function normalizeOcrToken(t) {
     .replace(/\s+/g, " ")
     .replace(/^(\d+)\s+(\d+)\s*\/\s*(\d+)["'"′″]*$/i, "$1 $2/$3")
     .trim();
+}
+
+/** Tesseract splits fin stock like AI11 into AI1 + 1; merge before joining. */
+function squashOcrFinMaterialSplits(tokens) {
+  const out = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const a = String(tokens[i] || "");
+    const b = i + 1 < tokens.length ? String(tokens[i + 1] || "") : "";
+    if (b && /^[A-Z]{2}\d$/i.test(a) && /^[0-9]$/i.test(b)) {
+      out.push(`${a}${b}`);
+      i++;
+      continue;
+    }
+    out.push(a);
+  }
+  return out;
+}
+
+/** If code ends at handing `-H/-LH/…` and OCR line still has `-1 1/2`, append it. */
+function appendTrailingConnectionFraction(code, lu) {
+  let c = String(code || "").replace(/\s+/g, " ").trim();
+  const pool = String(lu || "").replace(/\s+/g, " ").replace(/\s*\/\s*/g, "/").trim().toUpperCase();
+  if (!c || !pool) return code;
+  const segments = c.split("-");
+  const last = segments[segments.length - 1] || "";
+  if (/\s+\d+\/\d+|^\d\s+\d+\/\d+/i.test(last) || /\d\/\d/.test(last)) return code;
+  if (!/^(H|LH|RH|L|R|2)$/i.test(last)) return code;
+
+  const fullAnch = segments.join("-").toUpperCase();
+  const altFullAnch = fullAnch.replace(/-([A-Z]{2}\d)-(\d)(-H)$/i, "-$1$2$3");
+  let ix = -1;
+  let matchLen = 0;
+  const tryFull = altFullAnch !== fullAnch ? [fullAnch, altFullAnch] : [fullAnch];
+  for (const a of tryFull) {
+    const j = pool.indexOf(a);
+    if (j >= 0) {
+      ix = j;
+      matchLen = a.length;
+      break;
+    }
+  }
+  if (ix < 0 && segments.length > 6) {
+    const tail = segments.slice(-10).join("-").toUpperCase();
+    const altTail = tail.replace(/-([A-Z]{2}\d)-(\d)(-H)$/i, "-$1$2$3");
+    for (const a of [tail, altTail]) {
+      const j = pool.lastIndexOf(a);
+      if (j >= 0) {
+        ix = j;
+        matchLen = a.length;
+        break;
+      }
+    }
+  }
+  if (ix < 0) return code;
+  const rest = pool.slice(ix + matchLen).trim();
+  const m = /^[\s,.|_-]*(?:[-–]\s*)?(\d+)\s+(\d+\/\d+)/.exec(rest);
+  if (!m) return code;
+  const frac = normalizeOcrToken(`${m[1]} ${m[2]}`);
+  return frac ? `${c}-${frac}` : code;
 }
 
 /** Bridge line breaks OCR inserts inside coil strings (horizontal table lines). */
@@ -276,7 +345,7 @@ function consumeAdaptiveSegments(s, idx, maxTokens) {
 function scoreOcrCandidate(pfx, tokens) {
   if (tokens.length < OCR_MIN_SEGMENTS_AFTER_PREFIX) return -1;
   const candidate = `${pfx}-${tokens.join("-")}`;
-  let rank = tokens.length * 10 + (tokens.length >= OCR_MAX_SEGMENTS_AFTER_PREFIX ? 50 : 0);
+  let rank = tokens.length * 10 + (tokens.length >= OCR_STANDARD_TAIL_COUNT ? 50 : 0);
   if (parseCoilCode) {
     const r = parseCoilCode(candidate);
     if (r.ok) rank += 800;
@@ -293,11 +362,13 @@ function extractCoilCodeFromOcrText(rawText) {
   ].filter(Boolean));
   let best = "";
   let bestRank = -1;
+  const luBlob = [...variants].join("\n");
   for (const lu of variants) {
     const heads = findCoilHeadMatches(lu);
     for (const { pfx, tail } of heads) {
       for (const consume of [consumeAdaptiveSegments, consumeHyphenSegments, consumeFlexibleSegments]) {
-        const { tokens } = consume(lu, tail, OCR_MAX_SEGMENTS_AFTER_PREFIX);
+        let { tokens } = consume(lu, tail, OCR_MAX_SEGMENTS_AFTER_PREFIX);
+        tokens = squashOcrFinMaterialSplits(tokens);
         const r = scoreOcrCandidate(pfx, tokens);
         if (r > bestRank && tokens.length >= OCR_MIN_SEGMENTS_AFTER_PREFIX) {
           bestRank = r;
@@ -306,6 +377,7 @@ function extractCoilCodeFromOcrText(rawText) {
       }
     }
   }
+  if (best) best = appendTrailingConnectionFraction(best, luBlob || rawText);
   return best;
 }
 
