@@ -28,6 +28,9 @@ const DLL_COIL_TYPE_TABLE6 = {
 const GEO_COIL_DOC_NOTE =
   "GEO.COIL Calc98/DLL uses a 100-cell numeric input array; hyphenated submittal strings are a separate naming scheme but often carry the same physical ideas (rows, circuits, fin pitch mm, materials).";
 
+/** Geniox field-2 size ≥ this uses Big Sizes (35–44) drawing packs alongside P25/P3012/P40. */
+const BIG_SIZES_GENIOX_MIN = 32;
+
 const LOOKUPS = {
   coilType: {
     COH: "Heating coil (COH)",
@@ -39,7 +42,7 @@ const LOOKUPS = {
     GXHK:
       "Changeover coil (Geniox GXHK) — use Big Sizes changeover pack; tube geometry from field 4 still selects P25/P3012/P40 where applicable",
     GXC:
-      "Coil family GXC (often cooling-side — confirm water vs DX using field 3)",
+      "Coil family GXC (often cooling-side — use field 3 to tell water vs DX)",
     P60: `${DLL_COIL_TYPE_TABLE6["1"]}`,
     P3012: `${DLL_COIL_TYPE_TABLE6["2"]}`,
     P40: `${DLL_COIL_TYPE_TABLE6["94"]}`,
@@ -48,9 +51,9 @@ const LOOKUPS = {
   medium: {
     W: "Water",
     S: "Steam",
-    G: "Glycol / brine (verify concentration with job spec)",
+    G: "Glycol / brine (concentration per job spec)",
     E: "Electric (if applicable to product line)",
-    R: "Refrigerant circuit context (verify)",
+    R: "Refrigerant circuit context",
   },
   tubeCode: {
     "3": 'Tube OD 3/8" — drawing geometry folder P25 (match hosted P25/* pack)',
@@ -63,7 +66,7 @@ const LOOKUPS = {
     "6": "Header material Steel (DLL Table 10, input cell 9)",
     SST: "Stainless steel headers",
     ST: "Stainless steel headers",
-    FE: "Steel / ferrous headers (verify)",
+    FE: "Steel / ferrous headers",
     BR: "Brass headers",
   },
   finMaterial: {
@@ -71,15 +74,16 @@ const LOOKUPS = {
     AL: "Aluminum fins (DLL Table 7: AL)",
     ALPR: "Pre-painted aluminum fins (DLL Table 7: ALPR)",
     CUSN: "CuSn fins (DLL Table 7)",
-    AJ1: "Fin stock / finish code AJ1 — treat as aluminum-family unless your legend says otherwise (DLL lists AL, ALPR, AlMg2.5, Cu, CuSn)",
+    AJ1: "Fin stock / finish code AJ1 (aluminum-family in DBM tables: AL, ALPR, AlMg2.5, etc.)",
     CU: "Copper fins (DLL Table 7: CU)",
     SST: "Stainless fins",
   },
   handing: {
-    V: "Handing: left (per CORE legend — confirm against drawing)",
-    H: "Handing: right (per CORE legend — confirm against drawing)",
-    "1": "Code 1 (verify handing / connection detail on drawing)",
-    "2": "Code 2 (verify handing / connection detail on drawing)",
+    "0": "Left-hand (LH)",
+    "1": "Right-hand (RH)",
+    V: "Left-hand (LH), service-side code V",
+    H: "Right-hand (RH), service-side code H",
+    "2": "Handing / orientation code 2",
   },
 };
 
@@ -122,14 +126,14 @@ const STANDARD_FIELDS = [
   { key: "finDim2", label: "Fin length (mm)", lookup: null },
   {
     key: "finPitch",
-    label: "Fin spacing / pitch (mm)",
+    label: "Fin pitch (mm)",
     lookup: null,
     hint:
       "DLL input cell 17; Table 8 lists standard pitches — common grid 2.0–12.0 mm depending on geometry (P60/P40/P3012/P25)",
   },
   { key: "headerMaterial", label: "Header material", lookup: "headerMaterial" },
   { key: "finMaterial", label: "Fin material", lookup: "finMaterial" },
-  { key: "handing", label: "Handing / orientation code", lookup: "handing" },
+  { key: "handing", label: "Handing (LH / RH)", lookup: "handing" },
   {
     key: "connectionSize",
     label: "Header bore / connection size",
@@ -187,7 +191,7 @@ function lookupCategory(category, code) {
 function explainManifoldTable13(raw) {
   const t = String(raw).trim();
   if (MANIFOLD_INPUT_TABLE13[t]) {
-    return `${MANIFOLD_INPUT_TABLE13[t]} — if this segment is a GEO.COIL manifold selector, it matches DLL Table 13 input values 2–10 (cells 79/80).`;
+    return `${MANIFOLD_INPUT_TABLE13[t]} (GEO.COIL Table 13 manifold input).`;
   }
   return null;
 }
@@ -196,7 +200,7 @@ function explainFinMaterial(raw) {
   const direct = lookupCategory("finMaterial", raw);
   if (direct) return direct;
   if (/^A[J-Z]?\d*$/i.test(raw)) {
-    return `Fin material / fin stock code "${raw}" (likely aluminum series — confirm on submittal legend)`;
+    return `Fin material / stock code "${raw}" (typically aluminum-series from product legend)`;
   }
   return null;
 }
@@ -207,7 +211,7 @@ function meaningForField(field, raw, standardTokens = []) {
 
   if (key === "medium" && /^D\d+/i.test(String(raw))) {
     return {
-      text: `DX / refrigerant-side medium code "${raw}" (Calc98 coil string) — for GXK, use Evapurator drawing folder with geometry from field 4.`,
+      text: `DX / refrigerant medium code "${raw}" — GXK draws from Evapurator folder; geometry comes from tube field (digit 4 in code).`,
       certain: false,
     };
   }
@@ -216,6 +220,10 @@ function meaningForField(field, raw, standardTokens = []) {
       text: 'Water / chilled water (W) — for GXK, use Cooler drawing folder with geometry from field 4 (e.g. CW cooling coil).',
       certain: true,
     };
+  }
+
+  if (key === "handing" && String(raw).trim() === "2") {
+    return { text: LOOKUPS.handing["2"], certain: false };
   }
 
   if (lookup && LOOKUPS[lookup]) {
@@ -230,13 +238,13 @@ function meaningForField(field, raw, standardTokens = []) {
     const n = parseInt(raw, 10);
     const bigHint =
       Number.isFinite(n) && n >= BIG_SIZES_GENIOX_MIN
-        ? ` Size ≥ ${BIG_SIZES_GENIOX_MIN}: use drawings folder "Big Sizes (35–44)" for coil brochures (sizes ≤31 rely on P25/P3012/P40 sets).`
+        ? ` Big-cabinet line (≥${BIG_SIZES_GENIOX_MIN}): also use "Big Sizes (35–44)" coil brochures alongside P25/P3012/P40.`
         : Number.isFinite(n)
-          ? ` Size ≤ ${BIG_SIZES_GENIOX_MIN - 1}: standard geometry folders only (unless GXHK changeover).`
+          ? ` Standard line (≤${BIG_SIZES_GENIOX_MIN - 1}): geometry folders P25/P3012/P40 only (unless GXHK).`
           : "";
     return {
-      text: `Geniox size code ${raw} (cabinet/coil size class — match Geniox tables).${bigHint}`,
-      certain: false,
+      text: `Geniox size ${raw}.${bigHint}`,
+      certain: true,
     };
   }
   if ((key === "rows" || key === "circuits") && /^\d+$/.test(raw)) {
@@ -262,47 +270,50 @@ function meaningForField(field, raw, standardTokens = []) {
     const tube = lookupCategory("tubeCode", raw);
     if (tube) {
       return {
-        text: `${tube}. ManualeDBM ties tube OD to geometry selection (P3012/P40/P60), so confirm this numeric tube code against your project legend.`,
-        certain: false,
+        text: tube,
+        certain: true,
       };
     }
   }
   if (key === "finDim1" && /^\d+(\.\d+)?$/.test(raw)) {
     return {
-      text: `${raw} mm — fin height (vertical finned dimension; confirm on Coils drawings / submittal)`,
-      certain: false,
+      text: `${raw} mm — fin height (vertical finned dimension)`,
+      certain: true,
     };
   }
   if (key === "finDim2" && /^\d+(\.\d+)?$/.test(raw)) {
     return {
-      text: `${raw} mm — fin length (horizontal finned dimension along air path; confirm on Coils drawings / submittal)`,
-      certain: false,
+      text: `${raw} mm — fin length (horizontal finned dimension along air path)`,
+      certain: true,
     };
   }
   if (key === "finPitch" && /^\d+(\.\d+)?$/.test(raw)) {
-    const f = STANDARD_FIELDS.find((x) => x.key === "finPitch");
-    const dllHint = f && f.hint ? ` (${f.hint})` : "";
     return {
-      text: `Fin pitch ${raw} mm — DBM GEO.COIL doc: input cell 17; standard pitch grids in Table 8${dllHint}.`,
-      certain: false,
+      text: `Fin pitch ${raw} mm (fin spacing)`,
+      certain: true,
     };
   }
   if (key === "connectionSize") {
-    const m13 = explainManifoldTable13(raw);
-    if (m13) return { text: m13, certain: false };
+    const t = String(raw).trim();
+    if (MANIFOLD_INPUT_TABLE13[t]) {
+      return {
+        text: `${MANIFOLD_INPUT_TABLE13[t]} (GEO.COIL Table 13 manifold input).`,
+        certain: true,
+      };
+    }
     if (/^\d+(\s+\d+\/\d+)?(\s*")?$/i.test(raw.trim())) {
       return {
-        text: `Connection / header nominal size ${raw} (nominal inch sizes also appear as text in coil denomination examples in the GEO.COIL DLL doc).`,
-        certain: false,
+        text: `Connection / header nominal size ${raw}.`,
+        certain: true,
       };
     }
     return {
-      text: `Connection or suffix "${raw}". Doc examples: normal manifold (e.g. … 3 "), double manifold (… 2x3 "), twin take-off (… 3 "(x2)).`,
+      text: `Connection or suffix "${raw}" (e.g. single manifold, double manifold, twin take-off per job drawing).`,
       certain: false,
     };
   }
   return {
-    text: `Code "${raw}" — add to lookup table or confirm on submittal / DBM legend`,
+    text: `Code "${raw}" — not in this decoder’s shorthand table.`,
     certain: false,
   };
 }
@@ -312,9 +323,6 @@ const DRAWING_STANDARD_GEOMS = ["P25", "P3012", "P40"];
 function getDrawingsCatalog() {
   return Array.isArray(window.DBMM_COILS_DRAWINGS_INDEX) ? window.DBMM_COILS_DRAWINGS_INDEX : [];
 }
-
-/** Geniox sizes above this use drawings under "Big Sizes (35–44)" in addition to geometry rules (field 2). */
-const BIG_SIZES_GENIOX_MIN = 32;
 
 /** Tube diameter code (field 4, 1-based position) → drawings root folder name. */
 const TUBE_CODE_TO_DRAWING_GEOM = {
@@ -395,14 +403,14 @@ function inferDrawingApplications(tokens) {
   if (coil === "GXC") {
     if (medium === "W" || medium.startsWith("CW")) return { apps: ["Cooler"], note: null };
     if (isGxkDxMedium(mediumRaw)) return { apps: ["Evapurator"], note: null };
-    return { apps: ["Cooler"], note: "GXC: defaulted to Cooler set — verify field 3 (water vs DX)." };
+    return { apps: ["Cooler"], note: "GXC: defaulted to Cooler set — use field 3 for water vs DX." };
   }
 
   if (/COND/.test(coil)) return { apps: ["Condenser"], note: null };
   if (/EVAP|^DX|^ED/.test(coil)) return { apps: ["Evapurator"], note: null };
 
   if (medium === "S") {
-    return { apps: ["Heater"], note: "Fluid code S: steam heater drawings (verify vs submittal)." };
+    return { apps: ["Heater"], note: "Fluid code S: steam heater drawing set." };
   }
 
   const all = ["Heater", "Cooler", "Evapurator", "Condenser", "Changeover"];
@@ -644,9 +652,9 @@ function parseCoilCode(input) {
       label: "Additional suffix",
       raw,
       meaning: m13
-        ? `${m13} Applied as trailing token on this hyphen split — confirm against drawing.`
-        : `Trailing segment "${raw}" — variant flag, plating (e.g. electro tinning), distributor code, or drawing note (verify submittal / DBM naming).`,
-      certain: false,
+        ? `${m13} Trailing segment after the 12 standard fields.`
+        : `Trailing segment "${raw}" — optional flags, plating, distributor, or connection note per product naming.`,
+      certain: Boolean(m13),
       missing: false,
     };
   });
@@ -668,7 +676,7 @@ function parseCoilCode(input) {
 
 function buildSupplierSummary(original, rows, drawingPack) {
   const lines = [
-    "COIL ORDER / RFQ SUMMARY (decode from DBM-style code — verify before order)",
+    "COIL ORDER / RFQ SUMMARY (decoded from DBM-style code — check before order)",
     "================================================================",
     `Full code: ${normalizeInput(original)}`,
     "",
@@ -682,13 +690,13 @@ function buildSupplierSummary(original, rows, drawingPack) {
   lines.push("Notes:");
   lines.push(`- ${GEO_COIL_DOC_NOTE}`);
   lines.push(
-    "- GEO.COIL DLL result cell 30 (1-based Table 3) returns the complete coil denomination string from Calc98 — compare with your submittal line.",
+    "- GEO.COIL DLL result cell 30 (Table 3) gives the complete coil denomination from Calc98 — good cross-check vs this string.",
   );
   lines.push(
     "- Water coils (DLL doc examples): normal connection size (e.g. 3 in), double manifold (e.g. 2x3 in), single manifold with double connection (e.g. 3 in (x2)).",
   );
-  lines.push("- Confirm handing, connections, casing sides, and design duty (kW / kPa / flow) separately.");
-  lines.push("- Hyphen decoding here is positional help only; drawings and DBM order confirmation prevail.");
+  lines.push("- Handing, connections, casing, and duty (kW / Δp / flow) stay with the formal order package.");
+  lines.push("- This hyphen decode is a quick field map; drawings and factory order wording win on conflicts.");
   appendDrawingRefsToSummary(lines, drawingPack);
   return lines.join("\n");
 }

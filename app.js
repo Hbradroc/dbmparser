@@ -54,16 +54,24 @@ function renderTable(rows) {
   tableBody.innerHTML = "";
   for (const r of rows) {
     const tr = document.createElement("tr");
-    const badge =
-      !r.raw && r.key !== "extra"
-        ? '<span class="badge warn">Missing</span>'
-        : !r.certain
-          ? '<span class="badge warn">Verify</span>'
-          : '<span class="badge ok">Decoded</span>';
-    tr.innerHTML = `
-      <th>${r.position}${badge}</th>
-      <td class="raw">${escapeHtml(r.raw || "—")}</td>
-      <td class="meaning">${escapeHtml(r.label)} — ${escapeHtml(r.meaning)}</td>`;
+    const th = document.createElement("th");
+    th.textContent = String(r.position);
+    if (!r.raw && r.key !== "extra") {
+      const badge = document.createElement("span");
+      badge.className = "badge badge-missing";
+      badge.textContent = "Missing";
+      th.append(document.createTextNode(" "), badge);
+    }
+    const tdRaw = document.createElement("td");
+    tdRaw.className = "raw";
+    tdRaw.textContent = r.raw || "—";
+    const tdMeaning = document.createElement("td");
+    tdMeaning.className = [
+      "meaning",
+      !r.raw && r.key !== "extra" ? "meaning-missingcol" : r.certain ? "meaning-sure" : "meaning-maybe",
+    ].join(" ");
+    tdMeaning.textContent = `${r.label} — ${r.meaning}`;
+    tr.append(th, tdRaw, tdMeaning);
     tableBody.appendChild(tr);
   }
 }
