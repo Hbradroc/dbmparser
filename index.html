@@ -10,9 +10,9 @@
     <main>
       <h1>DBM coil code decoder</h1>
       <p class="sub">
-        Paste a hyphenated coil string from the submittal. The app maps each segment to field names and a short
-        description you can forward to a coil vendor. Extend lookups in
-        <code>coilParser.js</code> as you confirm codes with DBM.
+        Paste a hyphenated coil string from the submittal. The decoder uses <strong>positional fields</strong> and, where
+        values line up, cites <strong>DBM GEO.COIL / Calc98 DLL</strong> tables (geometry, fin pitch, manifold sizes, etc.)
+        from vendor documentation. Extend <code>coilParser.js</code> for codes that are purely drawing-specific.
       </p>
 
       <section class="panel" aria-labelledby="decode-heading">
@@ -59,7 +59,9 @@
       </section>
 
       <footer>
-        Open <code>index.html</code> directly in Chrome or Edge (<code>file://</code> is supported).
+        Local: open <code>index.html</code> in Chrome or Edge, or run <code>python -m http.server</code> from this folder.
+        Cross-check manifold numbers 2–10 with GEO.COIL DLL <strong>Table 13</strong>; compare full strings with Calc98
+        result <strong>cell 30</strong> (complete coil denomination).
       </footer>
     </main>
     <div id="toast" class="toast" role="status"></div>
@@ -83,7 +85,7 @@
       }
     </style>
 
-    <script defer src="coilParser.js?v=20260501a"></script>
-    <script defer src="app.js?v=20260501a"></script>
+    <script defer src="coilParser.js?v=20260501b"></script>
+    <script defer src="app.js?v=20260501b"></script>
   </body>
 </html>

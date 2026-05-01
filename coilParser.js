@@ -1,15 +1,47 @@
 /**
- * DBM-style hyphenated coil codes (COH/COK family and similar GXK-style strings).
- * Field meanings follow typical submittal breakdown; extend LOOKUPS for your plant.
+ * DBM-style hyphenated coil codes (COH/COK / GXK family and similar).
+ * Cross-checks where they overlap with DBM GEO.COIL / Calc98 DLL documentation
+ * (e.g. manifold Table 13, coil geometry Table 6, fin pitch Table 8).
  */
+
+/** Table 13 — DLL input value → manifold / threaded size (GEO.COIL DLL doc). */
+const MANIFOLD_INPUT_TABLE13 = {
+  "2": 'Manifold DN 20 / threaded ¾"',
+  "3": 'Manifold DN 25 / threaded 1"',
+  "4": 'Manifold DN 32 / threaded 1¼"',
+  "5": 'Manifold DN 40 / threaded 1½"',
+  "6": 'Manifold DN 50 / threaded 2"',
+  "7": 'Manifold DN 65 / threaded 2½"',
+  "8": 'Manifold DN 80 / threaded 3"',
+  "9": 'Manifold DN 100 / threaded 4"',
+  "10": 'Manifold DN 125 / threaded 5"',
+};
+
+/** Table 6 — Coil type numeric codes used by Calc98 input cell 1 (DLL doc). */
+const DLL_COIL_TYPE_TABLE6 = {
+  "1": "Geometry P60 (DLL coil type code 1 — doc notes P60 deprecated for new lines in some tables)",
+  "2": "Geometry P3012 (DLL coil type code 2)",
+  "94": "Geometry P40 (DLL coil type code 94)",
+  "113": "Geometry P25 (DLL coil type code 113)",
+};
+
+const GEO_COIL_DOC_NOTE =
+  "GEO.COIL Calc98/DLL uses a 100-cell numeric input array; hyphenated submittal strings are a separate naming scheme but often carry the same physical ideas (rows, circuits, fin pitch mm, materials).";
 
 const LOOKUPS = {
   coilType: {
     COH: "Heating coil (COH)",
     COK: "Cooling coil (COK)",
-    GXK: "Coil type GXK (confirm exact product line with DBM / submittal legend)",
-    GXH: "Coil type GXH (confirm with documentation)",
-    GXC: "Coil type GXC (confirm with documentation)",
+    GXK:
+      "Coil family code GXK (drawing/submittal nomenclature — not listed in GEO.COIL DLL Table 6 P60/P3012/P40/P25)",
+    GXH:
+      "Coil family code GXH (drawing/submittal nomenclature — confirm alongside DBM order description)",
+    GXC:
+      "Coil family code GXC (drawing/submittal nomenclature — confirm alongside DBM order description)",
+    P60: `${DLL_COIL_TYPE_TABLE6["1"]}`,
+    P3012: `${DLL_COIL_TYPE_TABLE6["2"]}`,
+    P40: `${DLL_COIL_TYPE_TABLE6["94"]}`,
+    P25: `${DLL_COIL_TYPE_TABLE6["113"]}`,
   },
   medium: {
     W: "Water",
@@ -24,16 +56,21 @@ const LOOKUPS = {
     "5": 'Tube OD 5/8"',
   },
   headerMaterial: {
-    CU: "Copper headers",
+    CU: "Copper headers (GEO.COIL DLL Table 10 maps header material Copper = numeric code 1 in cell 9)",
+    "1": "Header material Copper (DLL Table 10, input cell 9)",
+    "6": "Header material Steel (DLL Table 10, input cell 9)",
     SST: "Stainless steel headers",
     ST: "Stainless steel headers",
     FE: "Steel / ferrous headers (verify)",
     BR: "Brass headers",
   },
   finMaterial: {
-    AI: "Aluminum fins",
-    AL: "Aluminum fins",
-    CU: "Copper fins",
+    AI: "Aluminum fins (DLL Table 7: AL)",
+    AL: "Aluminum fins (DLL Table 7: AL)",
+    ALPR: "Pre-painted aluminum fins (DLL Table 7: ALPR)",
+    CUSN: "CuSn fins (DLL Table 7)",
+    AJ1: "Fin stock / finish code AJ1 — treat as aluminum-family unless your legend says otherwise (DLL lists AL, ALPR, AlMg2.5, Cu, CuSn)",
+    CU: "Copper fins (DLL Table 7: CU)",
     SST: "Stainless fins",
   },
   handing: {
@@ -54,7 +91,13 @@ const STANDARD_FIELDS = [
   { key: "circuits", label: "Number of circuits", lookup: null },
   { key: "finDim1", label: "Fin pack dimension 1 (mm or code per legend)", lookup: null },
   { key: "finDim2", label: "Fin pack dimension 2 (mm or code per legend)", lookup: null },
-  { key: "finPitch", label: "Fin spacing / pitch (mm)", lookup: null },
+  {
+    key: "finPitch",
+    label: "Fin spacing / pitch (mm)",
+    lookup: null,
+    hint:
+      "DLL input cell 17; Table 8 lists standard pitches — common grid 2.0–12.0 mm depending on geometry (P60/P40/P3012/P25)",
+  },
   { key: "headerMaterial", label: "Header material", lookup: "headerMaterial" },
   { key: "finMaterial", label: "Fin material", lookup: "finMaterial" },
   { key: "handing", label: "Handing / orientation code", lookup: "handing" },
@@ -112,6 +155,14 @@ function lookupCategory(category, code) {
   return null;
 }
 
+function explainManifoldTable13(raw) {
+  const t = String(raw).trim();
+  if (MANIFOLD_INPUT_TABLE13[t]) {
+    return `${MANIFOLD_INPUT_TABLE13[t]} — if this segment is a GEO.COIL manifold selector, it matches DLL Table 13 input values 2–10 (cells 79/80).`;
+  }
+  return null;
+}
+
 function explainFinMaterial(raw) {
   const direct = lookupCategory("finMaterial", raw);
   if (direct) return direct;
@@ -136,7 +187,11 @@ function meaningForField(field, raw) {
     return { text: `Size reference ${raw} (numeric code from product family)`, certain: false };
   }
   if ((key === "rows" || key === "circuits") && /^\d+$/.test(raw)) {
-    return { text: `${raw} (numeric per code table)`, certain: true };
+    const dll =
+      key === "rows"
+        ? " — DLL input cell 15 (number of rows)"
+        : " — DLL input cell 18 (number of circuits)";
+    return { text: `${raw} (numeric segment)${dll}`, certain: true };
   }
   if ((key === "finDim1" || key === "finDim2") && /^\d+(\.\d+)?$/.test(raw)) {
     return {
@@ -145,17 +200,24 @@ function meaningForField(field, raw) {
     };
   }
   if (key === "finPitch" && /^\d+(\.\d+)?$/.test(raw)) {
-    return { text: `Fin pitch ${raw} mm (typical for this code style — confirm)`, certain: false };
+    const f = STANDARD_FIELDS.find((x) => x.key === "finPitch");
+    const dllHint = f && f.hint ? ` (${f.hint})` : "";
+    return {
+      text: `Fin pitch ${raw} mm — DBM GEO.COIL doc: input cell 17; standard pitch grids in Table 8${dllHint}.`,
+      certain: false,
+    };
   }
   if (key === "connectionSize") {
+    const m13 = explainManifoldTable13(raw);
+    if (m13) return { text: m13, certain: false };
     if (/^\d+(\s+\d+\/\d+)?(\s*")?$/i.test(raw.trim())) {
       return {
-        text: `Connection / header nominal size ${raw} (typically inches — verify on drawing)`,
+        text: `Connection / header nominal size ${raw} (nominal inch sizes also appear as text in coil denomination examples in the GEO.COIL DLL doc).`,
         certain: false,
       };
     }
     return {
-      text: `Connection or suffix code "${raw}" (e.g. variant, nipple layout, distributor option — verify on legend)`,
+      text: `Connection or suffix "${raw}". Doc examples: normal manifold (e.g. … 3 "), double manifold (… 2x3 "), twin take-off (… 3 "(x2)).`,
       certain: false,
     };
   }
@@ -192,15 +254,20 @@ function parseCoilCode(input) {
     };
   });
 
-  const extraRows = extra.map((raw, j) => ({
-    position: standardCount + j + 1,
-    key: "extra",
-    label: "Additional suffix",
-    raw,
-    meaning: `Trailing segment "${raw}" (connection variant, distributor code, drawing ref — verify on submittal)`,
-    certain: false,
-    missing: false,
-  }));
+  const extraRows = extra.map((raw, j) => {
+    const m13 = explainManifoldTable13(raw);
+    return {
+      position: standardCount + j + 1,
+      key: "extra",
+      label: "Additional suffix",
+      raw,
+      meaning: m13
+        ? `${m13} Applied as trailing token on this hyphen split — confirm against drawing.`
+        : `Trailing segment "${raw}" — variant flag, plating (e.g. electro tinning), distributor code, or drawing note (verify submittal / DBM naming).`,
+      certain: false,
+      missing: false,
+    };
+  });
 
   const allRows = rows.concat(extraRows);
   const supplierText = buildSupplierSummary(input, allRows);
@@ -229,14 +296,24 @@ function buildSupplierSummary(original, rows) {
     lines.push("");
   }
   lines.push("Notes:");
+  lines.push(`- ${GEO_COIL_DOC_NOTE}`);
+  lines.push(
+    "- GEO.COIL DLL result cell 30 (1-based Table 3) returns the complete coil denomination string from Calc98 — compare with your submittal line.",
+  );
+  lines.push(
+    "- Water coils (DLL doc examples): normal connection size (e.g. 3 in), double manifold (e.g. 2x3 in), single manifold with double connection (e.g. 3 in (x2)).",
+  );
   lines.push("- Confirm handing, connections, casing sides, and design duty (kW / kPa / flow) separately.");
-  lines.push("- This tool interprets hyphen positions only; it is not a substitute for approved drawings.");
+  lines.push("- Hyphen decoding here is positional help only; drawings and DBM order confirmation prevail.");
   return lines.join("\n");
 }
 
 window.DBM_PARSER = {
   LOOKUPS,
   STANDARD_FIELDS,
+  GEO_COIL_DOC_NOTE,
+  MANIFOLD_INPUT_TABLE13,
+  DLL_COIL_TYPE_TABLE6,
   normalizeInput,
   tokenize,
   parseCoilCode,
