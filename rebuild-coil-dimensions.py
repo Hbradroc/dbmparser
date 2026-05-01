@@ -76,23 +76,28 @@ def json_cell(v):
     return v
 
 
+def _row_cell_tokens(row, n=16):
+    return [norm_cell(x).upper() for x in (row or ())[:n]]
+
+
+def _row_has_substr(cells, needle):
+    return any(needle in c for c in cells if c)
+
+
 def find_gx_header_row(ws, max_scan=55):
     for ri, row in enumerate(ws.iter_rows(max_row=max_scan, values_only=True)):
         if not row:
             continue
-        up = [norm_cell(x).upper() for x in row[:16]]
+        up = _row_cell_tokens(row)
         joined = "|".join(up)
         has_unit = "UNIT" in up or "UNIT" in joined
-        if has_unit and "L1" in up and "T1" in up:
+        # Headers like "L1 aleta" / "T1 aleta" (substring match, not whole cell).
+        has_l1 = _row_has_substr(up, "L1")
+        has_t1 = _row_has_substr(up, "T1")
+        has_t2 = _row_has_substr(up, "T2")
+        if has_unit and has_l1 and has_t1:
             return ri
-        if (
-            ri > 25
-            and "L3" not in joined
-            and "NUMBER OF CIRCUITS" not in joined
-            and ri == 999
-        ):
-            pass  # unreachable
-        if has_unit and "T2" in up:
+        if has_unit and has_l1 and has_t2:
             return ri
         if row[0] and norm_cell(row[0]).strip().upper() == "UNIT":
             return ri
@@ -186,15 +191,54 @@ def extract_sheet(wb, sheet_name: str, max_cols=32):
     return {"layout": "dvh", "headers": headers, "rows": out_rows}
 
 
+def norm_header_key(headers):
+    return tuple(norm_cell(h).upper().strip() for h in headers or [])
+
+
+def merge_gx_blocks(blocks: list):
+    """Append rows from every GX sheet that shares the same header row (e.g. Foglio 2 with GX11)."""
+    if not blocks:
+        return None
+    base = blocks[0]
+    hdr_key = norm_header_key(base["headers"])
+    merged_rows = list(base["rows"])
+    sheet_parts = [str(base.get("sheetName") or "")]
+    for b in blocks[1:]:
+        if norm_header_key(b["headers"]) != hdr_key:
+            print(
+                f"  skip merge {base.get('sheetName')} + {b.get('sheetName')}: headers differ",
+                file=sys.stderr,
+            )
+            continue
+        merged_rows.extend(b["rows"])
+        sheet_parts.append(str(b.get("sheetName") or ""))
+    merged = dict(base)
+    merged["rows"] = merged_rows
+    merged["sheetName"] = ", ".join(s for s in sheet_parts if s)
+    return merged
+
+
 def process_workbook(rel_path: str, use_local: bool) -> dict | None:
     wb = load_workbook(rel_path, use_local)
     try:
-        for si, name in enumerate(wb.sheetnames[:4]):
+        gx_blocks = []
+        first_other = None
+        for name in wb.sheetnames:
             block = extract_sheet(wb, name)
-            if block and block["rows"]:
-                block["sheetName"] = name
-                block["relPath"] = rel_path.replace("\\", "/")
-                return block
+            if not block or not block.get("rows"):
+                continue
+            block["sheetName"] = name
+            if block.get("layout") == "gx":
+                gx_blocks.append(block)
+            elif first_other is None:
+                first_other = block
+        if gx_blocks:
+            merged = merge_gx_blocks(gx_blocks) if len(gx_blocks) > 1 else gx_blocks[0]
+            merged["relPath"] = rel_path.replace("\\", "/")
+            return merged
+        if first_other:
+            first_other["relPath"] = rel_path.replace("\\", "/")
+            return first_other
     except Exception as e:
         print(f"  skip (error) {rel_path}: {e}", file=sys.stderr)
         return None

@@ -261,6 +261,7 @@ function renderDimensions(dimHits) {
     `Geniox ${dimHits.geniox} · ${dimHits.geometry}`,
     dimHits.application ? dimHits.application : null,
     dimHits.layout ? `layout: ${dimHits.layout}` : null,
+    dimHits.sheetName ? `sheet: ${dimHits.sheetName}` : null,
   ].filter(Boolean);
   dimExcelMetaEl.replaceChildren();
   dimExcelMetaEl.append(document.createTextNode(summaryBits.join(" · ")));

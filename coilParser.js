@@ -365,6 +365,75 @@ function circuitsColumnIndex(headers) {
   return i;
 }
 
+/** Column with connection / Ø / manifold-style size (fractions like 1/2" or ØIN DN codes). */
+function odOrConnectionColumnIndex(headers) {
+  if (!Array.isArray(headers)) return -1;
+  for (let i = 0; i < headers.length; i++) {
+    const raw = String(headers[i] ?? "").trim();
+    const u = raw.toUpperCase().replace(/\u00d8/g, "Ø");
+    const compact = u.replace(/\s+/g, "");
+    if (compact === "OD") return i;
+    if (compact === "ØIN" || compact === "OIN") return i;
+  }
+  return -1;
+}
+
+/** GEO.COL Table 13 input cell values → nominal threaded inch size (approximate for row matching). */
+const MANIFOLD_INPUT_TO_APPROX_INCHES = {
+  "2": 0.75,
+  "3": 1,
+  "4": 1.25,
+  "5": 1.5,
+  "6": 2,
+  "7": 2.5,
+  "8": 3,
+  "9": 4,
+  "10": 5,
+};
+
+/**
+ * Parses nominal inch size from coil field 13 (e.g. 1 1/2", 3/4, 1.5).
+ */
+function parseFractionInchesFromString(raw) {
+  let s = String(raw ?? "")
+    .trim()
+    .replace(/[\u2033\u201d\u201c\u00ab\u00bb]/g, " ")
+    .replace(/"/g, " ");
+  if (!s) return null;
+  s = s.replace(/-/g, " ").replace(/\s+/g, " ").trim();
+  const wm = s.match(/^(\d+)\s+(\d+)\s*\/\s*(\d+)$/);
+  if (wm) {
+    const w = parseInt(wm[1], 10);
+    const num = parseInt(wm[2], 10);
+    const den = parseInt(wm[3], 10);
+    if (den) return w + num / den;
+  }
+  const fm = s.match(/^(\d+)\s*\/\s*(\d+)$/);
+  if (fm) {
+    const num = parseInt(fm[1], 10);
+    const den = parseInt(fm[2], 10);
+    if (den) return num / den;
+  }
+  const dec = parseFloat(s.replace(",", "."));
+  return Number.isFinite(dec) ? dec : null;
+}
+
+function excelOdRoughlyMatchesCoil(odCell, coilInches) {
+  if (coilInches == null || !Number.isFinite(coilInches)) return true;
+  if (odCell == null || String(odCell).trim() === "") return true;
+  const fromText = parseFractionInchesFromString(String(odCell));
+  if (fromText != null && Math.abs(fromText - coilInches) < 0.065) return true;
+  const k = String(odCell).trim();
+  const m = MANIFOLD_INPUT_TO_APPROX_INCHES[k];
+  if (m != null && Math.abs(m - coilInches) < 0.065) return true;
+  const asNum = parseFloat(k.replace(",", "."));
+  if (Number.isFinite(asNum) && asNum >= 1 && asNum <= 12 && Math.abs(asNum - Math.round(asNum)) < 1e-6) {
+    const m2 = MANIFOLD_INPUT_TO_APPROX_INCHES[String(Math.round(asNum))];
+    if (m2 != null && Math.abs(m2 - coilInches) < 0.065) return true;
+  }
+  return false;
+}
+
 /** Band like "6 TO 10" vs coil circuits token numeric. */
 function circuitsBandAllowsCoil(bandCell, circuitsToken) {
   const t = String(circuitsToken ?? "").trim();
@@ -392,11 +461,15 @@ function rowMatchesGeniox(row0, geniox) {
 
 /**
  * Filter pre-extracted spreadsheet rows by Geniox / block size (col A / UNIT column) and circuits band when applicable.
+ * When the table has OD / ØIN and coil field 13 is a recognizable inch size, keep the best-matching diameter row(s).
  */
-function matchDimensionRowsForGeniox(table, geniox, circuitsToken) {
+function matchDimensionRowsForGeniox(table, geniox, circuitsToken, connectionToken) {
   const headers = table.headers || [];
   const rows = table.rows || [];
   const cIdx = circuitsColumnIndex(headers);
+  const odIdx = odOrConnectionColumnIndex(headers);
+  const connTrim = connectionToken != null ? String(connectionToken).trim().replace(/\s+/g, " ") : "";
+  const coilInches = connTrim ? parseFractionInchesFromString(connTrim.replace(/-/g, " ")) : null;
   const out = [];
   for (const row of rows) {
     if (!Array.isArray(row) || row.length === 0) continue;
@@ -405,6 +478,15 @@ function matchDimensionRowsForGeniox(table, geniox, circuitsToken) {
       if (!circuitsBandAllowsCoil(row[cIdx], circuitsToken)) continue;
     }
     out.push(row);
+  }
+  if (
+    odIdx >= 0 &&
+    coilInches != null &&
+    out.length > 0 &&
+    odIdx < headers.length
+  ) {
+    const filtered = out.filter((row) => excelOdRoughlyMatchesCoil(row[odIdx], coilInches));
+    if (filtered.length) return filtered;
   }
   return out;
 }
@@ -423,6 +505,7 @@ function resolveCoilDimensions(tokens) {
 
   const appsTry = apps.filter((a) => a !== "Changeover");
   const circuitsToken = tokens[5];
+  const connectionToken = tokens.length > 12 ? tokens[12] : "";
 
   const gatherHits = (withCircuitsFilter) => {
     const out = [];
@@ -430,7 +513,7 @@ function resolveCoilDimensions(tokens) {
       const table = cat[geometryKey][app];
       if (!table || !table.rows || !table.headers) continue;
       const tok = withCircuitsFilter ? circuitsToken : "*";
-      for (const row of matchDimensionRowsForGeniox(table, geniox, tok)) {
+      for (const row of matchDimensionRowsForGeniox(table, geniox, tok, connectionToken)) {
         out.push({ app, row, table });
       }
     }
@@ -457,10 +540,12 @@ function resolveCoilDimensions(tokens) {
 
   const first = hits[0];
   const table = first.table;
+  const sheetLabel = table.sheetName ? String(table.sheetName) : "";
   return {
     geniox,
     geometry: geometryKey,
     application: first.app,
+    sheetName: sheetLabel || null,
     headers: table.headers,
     matchedRows: hits.map((h) => h.row),
     layout: table.layout,
