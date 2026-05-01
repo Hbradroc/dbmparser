@@ -748,6 +748,28 @@ async function buildCoilReportPdfBytes() {
 
   y += 8;
   y = drawPdfSectionHeading(doc, marg, y, "Field breakdown");
+
+  /** Fixed widths summing to innerW so autoTable’s linebreak height matches the Meaning column */
+  const brkWNum = 36;
+  const brkWField = 98;
+  const brkWRaw = 78;
+  const brkWMean = Math.max(120, innerW - brkWNum - brkWField - brkWRaw);
+  /** Inner drawable width minus left+right cell padding (~8 pt each side). */
+  const brkMeaningPts = Math.max(48, Math.floor(brkWMean - 18));
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  if (typeof doc.setLineHeightFactor === "function") doc.setLineHeightFactor(1.25);
+
+  const fieldBreakBody = res.rows.map((r) => {
+    const meaning = String(r.meaning ?? "").replace(/\u00a0/g, " ");
+    const wrapped =
+      typeof doc.splitTextToSize === "function"
+        ? doc.splitTextToSize(meaning.trim() || "—", brkMeaningPts + 1)
+        : meaning || "—";
+    return [String(r.position), String(r.label || ""), r.raw ? String(r.raw) : "—", wrapped];
+  });
+
   doc.autoTable({
     startY: y,
     margin: { left: marg, right: marg },
@@ -773,12 +795,13 @@ async function buildCoilReportPdfBytes() {
     },
     alternateRowStyles: { fillColor: PDF_THEME.zebra },
     columnStyles: {
-      0: { cellWidth: 34, halign: "center" },
-      1: { cellWidth: 94 },
-      2: { cellWidth: 76 },
+      0: { cellWidth: brkWNum, halign: "center", valign: "top" },
+      1: { cellWidth: brkWField, valign: "top" },
+      2: { cellWidth: brkWRaw, valign: "top" },
+      3: { cellWidth: brkWMean, valign: "top", overflow: "linebreak", fontStyle: "normal" },
     },
     head: [["#", "Field", "Raw", "Meaning"]],
-    body: res.rows.map((r) => [String(r.position), r.label, r.raw ? String(r.raw) : "—", String(r.meaning || "")]),
+    body: fieldBreakBody,
     didParseCell(data) {
       if (data.section !== "body" || data.row == null) return;
       const srcRow = res.rows[data.row.index];
@@ -788,6 +811,7 @@ async function buildCoilReportPdfBytes() {
       if (data.column.index === 2) data.cell.styles.fontStyle = "bold";
     },
   });
+  if (typeof doc.setLineHeightFactor === "function") doc.setLineHeightFactor(1.15);
   y = doc.lastAutoTable.finalY + 28;
 
   const dim = res.dimensionHits;
