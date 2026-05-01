@@ -74,6 +74,40 @@ label.display {
   align-items: stretch;
 }
 
+.ocr-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  align-items: center;
+}
+
+.ocr-status {
+  margin: 0.5rem 0 0;
+  min-height: 1.35em;
+  color: var(--accent);
+}
+
+.ocr-debug {
+  margin-top: 0.65rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.ocr-debug pre {
+  margin: 0.5rem 0 0;
+  padding: 0.65rem 0.75rem;
+  max-height: 220px;
+  overflow: auto;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 input[type="text"] {
   flex: 1 1 220px;
   min-width: 0;

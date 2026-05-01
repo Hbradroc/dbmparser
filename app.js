@@ -22,11 +22,139 @@ const drawingPdfFrameEl = $("#drawing-pdf-frame");
 const dimExcelTitleEl = $("#dim-excel-title");
 const dimExcelMetaEl = $("#dim-excel-meta");
 const dimExcelWrapEl = $("#dim-excel-table-wrap");
+const ocrFileEl = $("#ocr-file");
+const btnOcrPick = $("#btn-ocr-pick");
+const ocrStatusEl = $("#ocr-status");
+const ocrDebugEl = $("#ocr-debug");
+const ocrDebugPreEl = $("#ocr-debug-pre");
 
 const LS_DRAWINGS_ROOT = "dbmCoilsDrawingsRoot";
 
 const parser = window.DBM_PARSER;
 const parseCoilCode = parser && typeof parser.parseCoilCode === "function" ? parser.parseCoilCode : null;
+
+/** Order matters: longer GX* codes first so the regex alternation matches GXHK before GXK. */
+const COIL_OCR_PREFIXES = ["GXHK", "GXK", "GXH", "COH", "COK"];
+const COIL_HEAD_RE = new RegExp(`\\b(?:${COIL_OCR_PREFIXES.join("|")})\\b`, "g");
+
+function preprocessCoilOcr(raw) {
+  let s = String(raw || "")
+    .replace(/\r?\n|[\x0b\x0c\u0085\u2028\u2029]/g, " ")
+    .replace(/[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]/g, "-");
+  s = s.replace(/coil\s*code[:]?\s*/gi, " ");
+  s = s.replace(/\(\s*[^\)]*\)/g, " ");
+  s = s.replace(/\bAI\s+11\b/gi, "AI11");
+  s = s.replace(/\bAJ\s*1\b/gi, "AJ1");
+  s = s.replace(/\b(\d+)\s*\.\s*(\d+)\b/g, "$1.$2");
+  s = s.replace(/\bGX\s*HK\b/gi, "GXHK");
+  s = s.replace(/\bGX\s*K\b/gi, "GXK");
+  s = s.replace(/\bGX\s*H\b/gi, "GXH");
+  s = s.replace(/\bC\s*O\s*H\b/gi, "COH");
+  s = s.replace(/\bC\s*O\s*K\b/gi, "COK");
+  s = s.replace(/\s*-\s*/g, "-");
+  s = s.replace(/\s+/g, " ");
+  return s.trim().toUpperCase();
+}
+
+function skipWsHyphen(s, i) {
+  let j = i;
+  while (j < s.length && /\s/.test(s[j])) j++;
+  if (j < s.length && s[j] === "-") {
+    j++;
+    while (j < s.length && /\s/.test(s[j])) j++;
+  }
+  return j;
+}
+
+function consumeHyphenSegments(s, idx) {
+  const tokens = [];
+  let i = idx;
+  for (let guard = 0; guard < 28; guard++) {
+    const j = skipWsHyphen(s, i);
+    i = j;
+    if (i >= s.length || !/[A-Z0-9.]/.test(s[i])) break;
+    const rest = s.slice(i);
+    const hm = /^(\d+\.\d+|[A-Z]{1,8}\d*|\d+)/.exec(rest);
+    if (!hm) break;
+    tokens.push(hm[1]);
+    i += hm[0].length;
+  }
+  return { tokens, end: i };
+}
+
+function extractCoilCodeFromOcrText(rawText) {
+  const lu = preprocessCoilOcr(rawText);
+  if (!lu) return "";
+  let best = "";
+  let bestRank = -1;
+  COIL_HEAD_RE.lastIndex = 0;
+  let m;
+  while ((m = COIL_HEAD_RE.exec(lu)) !== null) {
+    const pfx = m[0];
+    const afterHead = m.index + m[0].length;
+    const { tokens } = consumeHyphenSegments(lu, afterHead);
+    if (tokens.length < 10) continue;
+    const candidate = `${pfx}-${tokens.join("-")}`;
+    let rank = tokens.length * 10;
+    if (parseCoilCode) {
+      const r = parseCoilCode(candidate);
+      if (r.ok) rank += 800;
+    }
+    if (rank > bestRank) {
+      bestRank = rank;
+      best = candidate;
+    }
+  }
+  return best;
+}
+
+async function runOcrOnBlob(blob) {
+  if (!blob) return;
+  if (ocrDebugEl && ocrDebugPreEl) {
+    ocrDebugEl.hidden = true;
+    ocrDebugPreEl.textContent = "";
+  }
+  errEl.textContent = "";
+  if (!window.Tesseract || typeof window.Tesseract.recognize !== "function") {
+    errEl.textContent =
+      "OCR library (Tesseract.js) failed to load. Check your network connection or extensions blocking the CDN script.";
+    return;
+  }
+  if (ocrStatusEl) {
+    ocrStatusEl.style.color = "var(--accent)";
+    ocrStatusEl.textContent = "Reading image… (first run may download OCR data)";
+  }
+  try {
+    const ret = await Tesseract.recognize(blob, "eng", {
+      logger(m) {
+        if (!ocrStatusEl) return;
+        if (m.status === "recognizing text") {
+          ocrStatusEl.textContent = `OCR… ${Math.round((m.progress || 0) * 100)}%`;
+        }
+      },
+    });
+    const text = ret?.data?.text || "";
+    if (ocrStatusEl) ocrStatusEl.textContent = "";
+    const code = extractCoilCodeFromOcrText(text);
+    if (code) {
+      inputEl.value = code;
+      showToast("Coil code extracted from image");
+      decode();
+      return;
+    }
+    errEl.textContent =
+      "Could not find a long hyphenated coil pattern in the OCR text. Crop closer to the code row or paste the code manually.";
+    if (ocrDebugEl && ocrDebugPreEl) {
+      ocrDebugPreEl.textContent = text.trim() ? text.trim().slice(0, 6000) : "(empty OCR result)";
+      ocrDebugEl.hidden = false;
+    }
+  } catch (err) {
+    if (ocrStatusEl) ocrStatusEl.textContent = "";
+    errEl.textContent =
+      typeof err?.message === "string" ? `OCR failed: ${err.message}` : "OCR failed unexpectedly.";
+    if (window.console && console.warn) console.warn(err);
+  }
+}
 
 function joinDrawingsPath(root, relPath) {
   const r = String(root || "").trim().replace(/[\\/]+$/, "");
@@ -302,6 +430,13 @@ if (drawingsRootEl) {
 btnClear.addEventListener("click", () => {
   inputEl.value = "";
   errEl.textContent = "";
+  if (ocrStatusEl) {
+    ocrStatusEl.textContent = "";
+  }
+  if (ocrDebugEl && ocrDebugPreEl) {
+    ocrDebugEl.hidden = true;
+    ocrDebugPreEl.textContent = "";
+  }
   segmentsEl.innerHTML = "";
   tableBody.innerHTML = "";
   summaryEl.value = "";
@@ -340,5 +475,28 @@ inputEl.value =
 
 decode();
 
+document.addEventListener(
+  "paste",
+  (e) => {
+    const items = e.clipboardData?.items;
+    if (!items || !items.length) return;
+    const imgItem = Array.from(items).find((it) => String(it.type || "").startsWith("image/"));
+    if (!imgItem) return;
+    const blob = imgItem.getAsFile();
+    if (!blob) return;
+    e.preventDefault();
+    runOcrOnBlob(blob);
+  },
+  true
+);
+
+btnOcrPick?.addEventListener("click", () => ocrFileEl?.click());
+ocrFileEl?.addEventListener("change", () => {
+  const f = ocrFileEl.files?.[0];
+  if (f) runOcrOnBlob(f);
+  ocrFileEl.value = "";
+});
+
 window.DBM_COIL = window.DBM_PARSER || {};
+window.extractCoilCodeFromOcrText = extractCoilCodeFromOcrText;
 }

@@ -36,6 +36,19 @@
           <button type="button" class="ghost" id="btn-clear">Clear</button>
         </div>
         <p id="error-msg" class="sub" role="alert" style="margin: 0.75rem 0 0; color: var(--danger)"></p>
+        <label class="display" for="btn-ocr-pick" style="margin-top: 1rem">From screenshot</label>
+        <p class="sub" style="margin: 0 0 0.5rem">
+          Paste an image (Ctrl+V) anywhere on this page, or choose a file — OCR tries to fill the coil code (Tesseract.js, first run may fetch language data).
+        </p>
+        <div class="ocr-row">
+          <input type="file" id="ocr-file" accept="image/*" hidden />
+          <button type="button" class="ghost" id="btn-ocr-pick">Choose image…</button>
+        </div>
+        <p id="ocr-status" class="sub ocr-status" aria-live="polite"></p>
+        <details id="ocr-debug" class="ocr-debug" hidden>
+          <summary>OCR raw text (debug)</summary>
+          <pre id="ocr-debug-pre"></pre>
+        </details>
         <div class="display" style="margin-top: 1rem">Segments</div>
         <div id="segments" class="segments" aria-live="polite"></div>
       </section>
@@ -120,9 +133,10 @@
       }
     </style>
 
-    <script defer src="coilParser.js?v=20260501m"></script>
-    <script defer src="coilsDrawingsIndex.js?v=20260501m"></script>
-    <script defer src="coilsDimensionsData.js?v=20260501m"></script>
-    <script defer src="app.js?v=20260501m"></script>
+    <script defer src="coilParser.js?v=20260501n"></script>
+    <script defer src="coilsDrawingsIndex.js?v=20260501n"></script>
+    <script defer src="coilsDimensionsData.js?v=20260501n"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js" crossorigin="anonymous"></script>
+    <script defer src="app.js?v=20260501n"></script>
   </body>
 </html>
