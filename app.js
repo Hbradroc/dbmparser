@@ -1239,11 +1239,13 @@ inputEl.addEventListener("keydown", (e) => {
   }
 });
 
-// Example from user
-inputEl.value =
-  "GXK-41-W-4-10-102-1830-3500-3.0-CU-AJ1-1-tt-3";
-
-decode();
+/** Empty startup — no sample code, decode, or previews until the user runs Decode. */
+errEl.textContent = "";
+segmentsEl.innerHTML = "";
+tableBody.innerHTML = "";
+summaryEl.value = "";
+renderDrawingRefs(null, drawingsRootEl ? drawingsRootEl.value : "");
+renderDimensions(null);
 
 document.addEventListener(
   "paste",
