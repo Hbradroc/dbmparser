@@ -154,6 +154,8 @@ function normalizeInput(raw) {
   s = s.replace(/\s*-\s*/g, "-");
   /** Slash lost in OCR/submittals: …-H-1-112− should read 1½ in (also fixes hyphen split before token repair). */
   s = s.replace(/-1-112(?=-|$)/gi, '-1 1/2"');
+  /** Same inch group right after handing letter (…-H-1-112). */
+  s = s.replace(/-H-1-112(?=-|$)/gi, '-H-1 1/2"');
   return s;
 }
 
@@ -174,6 +176,32 @@ function expandSplitCodes(tokens) {
   return out;
 }
 
+/** Adjacent tokens `1` + `112` (lost slash/quote) → inch nominal for header bore. */
+function mergeInchNominalSplit(tokens) {
+  const out = [...tokens];
+  for (let i = 0; i < out.length - 1; i++) {
+    if (String(out[i]) === "1" && /^112$/i.test(String(out[i + 1]))) {
+      out.splice(i, 2, `1 1/2"`);
+      return mergeInchNominalSplit(out);
+    }
+  }
+  return out;
+}
+
+/** Duplicate handing letter (…-H-H-…) when OCR repeats the column. */
+function collapseDuplicateHandingLetter(tokens) {
+  const out = [...tokens];
+  for (let i = 0; i < out.length - 1; i++) {
+    const a = String(out[i] ?? "");
+    const b = String(out[i + 1] ?? "");
+    if (/^(H|LH|RH)$/i.test(a) && a.toUpperCase() === b.toUpperCase()) {
+      out.splice(i + 1, 1);
+      return out;
+    }
+  }
+  return out;
+}
+
 /** Mis-OCR merges "1 1/2" into hyphen runs like …-H-1-112 or drops the slash (− …-112). */
 function repairConnectionFractionSplits(tokens) {
   const ixHand = STANDARD_FIELDS.findIndex((f) => f.key === "handing");
@@ -182,13 +210,10 @@ function repairConnectionFractionSplits(tokens) {
 
   const out = tokens.slice();
 
-  /** …- handing [ixHand] − connection − extra after standard count */
-  if (!/^(H|LH|RH|L|R|2)$/i.test(String(out[ixHand] || ""))) return out;
-
   const a = String(out[ixConn] ?? "");
   const b = String(out[ixConn + 1] ?? "");
 
-  /** …- H − 1 − 112 − */
+  /** …- H − 1 − 112 − (connection column still wrong — handled by mergeInch first; keep for extras) */
   if (a === "1" && /^112$/i.test(b)) {
     out.splice(ixConn, 2, `1 1/2"`);
     return out;
@@ -203,6 +228,17 @@ function repairConnectionFractionSplits(tokens) {
     out.splice(ixConn, 3, `1 1/2"`);
     return out;
   }
+
+  /** Connection slot holds a second handing code; next two tokens are inch fragments */
+  if (
+    /^(H|LH|RH|L|R|2)$/i.test(a) &&
+    String(out[ixConn + 1] ?? "") === "1" &&
+    /^112$/i.test(String(out[ixConn + 2] ?? ""))
+  ) {
+    out.splice(ixConn, 3, `1 1/2"`);
+    return out;
+  }
+
   return out;
 }
 
@@ -210,11 +246,17 @@ function repairConnectionFractionSplits(tokens) {
  * Split on hyphens; keep segments. Header sizes like "1 1/4" stay as one segment.
  */
 function tokenize(code) {
-  const parts = normalizeInput(code)
+  let parts = normalizeInput(code)
     .split("-")
     .map((t) => t.trim())
     .filter(Boolean);
-  return repairConnectionFractionSplits(expandSplitCodes(parts));
+  parts = expandSplitCodes(parts);
+  parts = mergeInchNominalSplit(parts);
+  parts = collapseDuplicateHandingLetter(parts);
+  parts = repairConnectionFractionSplits(parts);
+  parts = mergeInchNominalSplit(parts);
+  parts = collapseDuplicateHandingLetter(parts);
+  return parts;
 }
 
 function lookupCategory(category, code) {

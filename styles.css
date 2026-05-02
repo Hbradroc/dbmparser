@@ -36,6 +36,54 @@ main {
   padding: 2rem 1.25rem 3rem;
 }
 
+.app-page-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem 1.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.app-page-head-main {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.app-authorbrand {
+  flex: 0 0 auto;
+  text-align: right;
+  padding-top: 0.15rem;
+}
+
+.app-authorbrand-name {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: 0.02em;
+}
+
+.app-authorbrand-mail {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--accent);
+  text-decoration: none;
+  font-family: ui-monospace, "Cascadia Code", monospace;
+}
+
+.app-authorbrand-mail:hover {
+  text-decoration: underline;
+  color: #7dd3fc;
+}
+
+.app-mail-icon {
+  flex-shrink: 0;
+  opacity: 0.95;
+}
+
 h1 {
   font-size: 1.5rem;
   font-weight: 600;
@@ -384,6 +432,19 @@ footer {
   margin-top: 2rem;
   font-size: 0.8rem;
   color: var(--muted);
+}
+
+footer .footer-brand {
+  margin: 0 0 0.65rem;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--text);
+  opacity: 0.85;
+}
+
+footer .footer-notes {
+  margin: 0;
 }
 
 .pdf-preview-slot {
